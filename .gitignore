@@ -1,0 +1,10 @@
+# secrets
+.env
+
+# local DB files (if you ever use SQLite)
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE noise
+.idea/
