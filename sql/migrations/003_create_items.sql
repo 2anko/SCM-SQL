@@ -1,0 +1,10 @@
+CREATE SCHEMA IF NOT EXISTS scm;
+
+CREATE TABLE IF NOT EXISTS scm.items (
+  item_id BIGSERIAL PRIMARY KEY,
+  sku TEXT NOT NULL UNIQUE,
+  item_name TEXT NOT NULL,
+  item_type TEXT NOT NULL CHECK (item_type IN ('RAW', 'FINISHED')),
+  unit TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
