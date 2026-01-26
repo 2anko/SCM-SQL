@@ -1,0 +1,25 @@
+services:
+  db:
+    image: postgres:16
+    container_name: scm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: scm
+      POSTGRES_USER: scm_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      # persistent database storage (NOT in git)
+      - pgdata:/var/lib/postgresql/data
+
+      # init scripts: run ONLY the first time the DB is created
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scm_user -d scm"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

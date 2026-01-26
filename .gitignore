@@ -8,3 +8,12 @@
 
 # IDE noise
 .idea/
+.DS_Store
+
+# dotnet
+**/bin/
+**/obj/
+.vs/
+
+# logs
+*.log
