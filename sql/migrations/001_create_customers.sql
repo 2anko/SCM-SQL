@@ -10,4 +10,4 @@ CREATE TABLE IF NOT EXISTS customers (
 
 -- optional: prevent duplicate company names
 CREATE UNIQUE INDEX IF NOT EXISTS ux_customers_company_name
-ON customers (company_name);
+ON scm.customers (company_name);
