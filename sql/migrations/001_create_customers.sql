@@ -1,3 +1,5 @@
+CREATE SCHEMA IF NOT EXISTS scm;
+
 CREATE TABLE IF NOT EXISTS customers (
   customer_id BIGSERIAL PRIMARY KEY,
   company_name TEXT NOT NULL,
