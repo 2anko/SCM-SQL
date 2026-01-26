@@ -15,6 +15,7 @@ services:
 
       # init scripts: run ONLY the first time the DB is created
       - ./db/init:/docker-entrypoint-initdb.d:ro
+      - ./sql:/sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U scm_user -d scm"]
       interval: 5s
