@@ -1,0 +1,6 @@
+@ScmApi_HostAddress = http://localhost:5215
+
+GET {{ScmApi_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
