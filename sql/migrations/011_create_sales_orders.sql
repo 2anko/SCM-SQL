@@ -1,25 +1,23 @@
 CREATE SCHEMA IF NOT EXISTS scm;
 
-CREATE TABLE IF NOT EXISTS scm.sales_orders (
-  sales_order_id BIGSERIAL PRIMARY KEY,
-  so_number      TEXT NOT NULL UNIQUE,     -- e.g., "SO-2026-0001"
+CREATE TYPE so_status AS ENUM ('DRAFT', 'CONFIRMED', 'PARTIALLY_SHIPPED', 'SHIPPED', 'DELIVERED', 'CANCELLED');
 
-  customer_id    BIGINT NOT NULL REFERENCES scm.customers(customer_id),
-  ship_from_warehouse_id BIGINT NOT NULL REFERENCES scm.warehouses(warehouse_id),
-
-  order_date     DATE NOT NULL DEFAULT CURRENT_DATE,
-  requested_ship_date DATE,
-
-  status         TEXT NOT NULL DEFAULT 'DRAFT'
-    CHECK (status IN ('DRAFT', 'CONFIRMED', 'PARTIALLY_SHIPPED', 'SHIPPED', 'CANCELLED')),
-
-  ship_to_address TEXT,    -- optional override (otherwise use customer address)
-  note            TEXT,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+CREATE TABLE sales_orders (
+    id              SERIAL PRIMARY KEY,
+    customer_id     INT NOT NULL REFERENCES customers(id),
+    status          so_status NOT NULL DEFAULT 'DRAFT',
+    shipping_address TEXT,
+    expected_date   DATE,
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    updated_at      TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS ix_so_customer
-ON scm.sales_orders (customer_id);
-
-CREATE INDEX IF NOT EXISTS ix_so_status_date
-ON scm.sales_orders (status, order_date);
+CREATE TABLE sales_order_lines (
+    id              SERIAL PRIMARY KEY,
+    so_id           INT NOT NULL REFERENCES sales_orders(id) ON DELETE CASCADE,
+    item_id         INT NOT NULL REFERENCES items(id),
+    quantity_ordered    NUMERIC(12, 4) NOT NULL,
+    quantity_shipped    NUMERIC(12, 4) NOT NULL DEFAULT 0,
+    unit_price          NUMERIC(12, 2) NOT NULL,
+    source_warehouse_id INT REFERENCES warehouses(id)
+);

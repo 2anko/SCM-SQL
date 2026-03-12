@@ -1,37 +1,27 @@
 CREATE SCHEMA IF NOT EXISTS scm;
 
-CREATE TABLE IF NOT EXISTS scm.inventory_transactions (
-  txn_id        BIGSERIAL PRIMARY KEY,
-  txn_ts        TIMESTAMPTZ NOT NULL DEFAULT now(),
-
-  warehouse_id  BIGINT NOT NULL REFERENCES scm.warehouses(warehouse_id),
-  item_id       BIGINT NOT NULL REFERENCES scm.items(item_id),
-
-  -- Use signed quantity:
-  --   + = stock IN (receive, transfer_in, adjustment_up)
-  --   - = stock OUT (ship, transfer_out, adjustment_down)
-  qty           NUMERIC(18,4) NOT NULL CHECK (qty <> 0),
-
-  txn_type      TEXT NOT NULL CHECK (
-    txn_type IN (
-      'RECEIPT',        -- received from supplier / production company
-      'ISSUE',          -- issued/consumed internally
-      'SALE_SHIP',      -- shipped to customer
-      'ADJUSTMENT',     -- manual correction
-      'TRANSFER_IN',    -- moved into this warehouse
-      'TRANSFER_OUT'    -- moved out of this warehouse
-    )
-  ),
-
-  -- Optional fields to link to future tables (POs, SOs, etc.)
-  reference_type TEXT,          -- e.g., 'PO', 'SO'
-  reference_id   BIGINT,        -- e.g., purchase_order_id
-  note           TEXT
+CREATE TYPE inventory_txn_type AS ENUM (
+    'RECEIPT',      -- goods in from supplier (tied to PO)
+    'SHIPMENT',     -- goods out to customer (tied to SO)
+    'TRANSFER_IN',  -- received from another warehouse
+    'TRANSFER_OUT', -- sent to another warehouse
+    'ADJUSTMENT',   -- manual stock correction
+    'RETURN_IN',    -- customer return
+    'RETURN_OUT'    -- return to supplier
 );
 
--- Helpful indexes for reporting
-CREATE INDEX IF NOT EXISTS ix_inv_txn_wh_item_ts
-ON scm.inventory_transactions (warehouse_id, item_id, txn_ts);
-
-CREATE INDEX IF NOT EXISTS ix_inv_txn_item_ts
-ON scm.inventory_transactions (item_id, txn_ts);
+CREATE TABLE inventory_transactions (
+    id                  SERIAL PRIMARY KEY,
+    txn_type            inventory_txn_type NOT NULL,
+    item_id             INT NOT NULL REFERENCES items(id),
+    warehouse_id        INT NOT NULL REFERENCES warehouses(id),
+    -- For transfers, track the counterpart warehouse
+    related_warehouse_id INT REFERENCES warehouses(id),
+    quantity            NUMERIC(12, 4) NOT NULL,  -- always positive; direction implied by txn_type
+    -- Optional references to source documents
+    purchase_order_id   INT REFERENCES purchase_orders(id),
+    sales_order_id      INT REFERENCES sales_orders(id),
+    notes               TEXT,
+    created_by          INT,  -- FK to a users table if you add one
+    created_at          TIMESTAMPTZ DEFAULT now()
+);
