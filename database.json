@@ -1,0 +1,10 @@
+{
+  "defaultEnv": "default",
+  "default": {
+    "url": {
+      "ENV": "DATABASE_URL"
+    },
+    "dir": "sql/migrations",
+    "migration-file-language": "sql"
+  }
+}
