@@ -1,8 +1,10 @@
 import 'dotenv/config';
 import Fastify from 'fastify';
 import jwt from '@fastify/jwt';
+import bcrypt from 'bcryptjs';
 
 import { getTenantDb, closeTenantDb } from './config/db.js';
+import { getUserByEmail } from './queries/users.js';
 
 // Routes
 import itemRoutes       from './routes/items.js';
@@ -12,16 +14,15 @@ import customerRoutes   from './routes/customers.js';
 import inventoryRoutes  from './routes/inventory.js';
 import poRoutes         from './routes/purchaseOrders.js';
 import soRoutes         from './routes/salesOrders.js';
+import userRoutes             from './routes/users.js';
+import supplierFactoryRoutes  from './routes/supplierFactories.js';
 
 const app = Fastify({ logger: true });
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 app.register(jwt, { secret: process.env.JWT_SECRET });
 
-// Decorate every request with a .db pool scoped to the authenticated company.
-// Routes call `await request.db.query(...)` directly — no tenant ID juggling.
 app.addHook('onRequest', async (request, reply) => {
-  // Skip auth for the login route
   if (request.url === '/auth/login') return;
 
   try {
@@ -32,19 +33,34 @@ app.addHook('onRequest', async (request, reply) => {
   }
 });
 
-// ── Auth route (login returns a JWT) ─────────────────────────────────────────
-// In production you'd validate against your master DB here.
+// ── Auth route ────────────────────────────────────────────────────────────────
+// Body: { companyId, connectionString, email, password }
+// connectionString only required on first login (used to init the DB pool).
 app.post('/auth/login', async (request, reply) => {
-  const { companyId, apiKey } = request.body;
+  const { companyId, connectionString, email, password } = request.body ?? {};
 
-  // TODO: look up companyId in master DB, verify apiKey (hashed)
-  // For now, a placeholder:
-  if (!companyId || !apiKey) {
-    return reply.code(400).send({ error: 'companyId and apiKey are required' });
+  if (!companyId || !email || !password) {
+    return reply.code(400).send({ error: 'companyId, email and password are required' });
   }
 
-  const token = app.jwt.sign({ companyId }, { expiresIn: '8h' });
-  return { token };
+  let db;
+  try {
+    db = await getTenantDb(companyId, connectionString);
+  } catch {
+    return reply.code(400).send({ error: 'Could not connect to company database. Provide a valid connectionString.' });
+  }
+
+  const user = await getUserByEmail(db, email);
+  if (!user) return reply.code(401).send({ error: 'Invalid credentials' });
+
+  const passwordMatch = await bcrypt.compare(password, user.password_hash);
+  if (!passwordMatch) return reply.code(401).send({ error: 'Invalid credentials' });
+
+  const token = app.jwt.sign(
+    { companyId, userId: user.id, role: user.role },
+    { expiresIn: '8h' }
+  );
+  return { token, role: user.role };
 });
 
 // ── Domain routes ─────────────────────────────────────────────────────────────
@@ -55,6 +71,8 @@ app.register(customerRoutes,  { prefix: '/customers' });
 app.register(inventoryRoutes, { prefix: '/inventory' });
 app.register(poRoutes,        { prefix: '/purchase-orders' });
 app.register(soRoutes,        { prefix: '/sales-orders' });
+app.register(userRoutes,             { prefix: '/users' });
+app.register(supplierFactoryRoutes,  { prefix: '/suppliers' });
 
 // ── Graceful shutdown ─────────────────────────────────────────────────────────
 const shutdown = async () => {

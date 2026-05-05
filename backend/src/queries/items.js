@@ -27,7 +27,6 @@ export async function createItem(db, { sku, name, description, unit_of_measure, 
 }
 
 export async function updateItem(db, id, fields) {
-  // Only update fields that were actually sent
   const allowed = ['name', 'description', 'unit_of_measure', 'unit_cost', 'unit_price'];
   const updates = [];
   const values  = [];
@@ -51,6 +50,19 @@ export async function updateItem(db, id, fields) {
 }
 
 export async function deleteItem(db, id) {
+  const { rows: [{ total }] } = await db.query(`
+    SELECT (
+      (SELECT COUNT(*) FROM inventory_transactions WHERE item_id = $1) +
+      (SELECT COUNT(*) FROM purchase_order_lines  WHERE item_id = $1) +
+      (SELECT COUNT(*) FROM sales_order_lines     WHERE item_id = $1) +
+      (SELECT COUNT(*) FROM inventory             WHERE item_id = $1)
+    ) AS total
+  `, [id]);
+
+  if (parseInt(total) > 0) {
+    throw new Error('Cannot delete item that is referenced by existing orders or inventory records');
+  }
+
   const { rowCount } = await db.query(`DELETE FROM items WHERE id = $1`, [id]);
   return rowCount > 0;
 }

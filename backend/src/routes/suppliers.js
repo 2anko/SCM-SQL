@@ -1,18 +1,76 @@
 // routes/suppliers.js
-export default async function supplierRoutes(app) {
-  app.get('/', async (req) => (await req.db.query(
-    `SELECT s.*, json_agg(sf.*) AS factories
-     FROM suppliers s
-     LEFT JOIN supplier_factories sf ON sf.supplier_id = s.id
-     GROUP BY s.id ORDER BY s.name`
-  )).rows);
+import { authorize } from '../middleware/authorize.js';
 
-  app.post('/', async (req, rep) => {
-    const { name, email, phone, address } = req.body;
-    const { rows } = await req.db.query(
-      'INSERT INTO suppliers (name, email, phone, address) VALUES ($1,$2,$3,$4) RETURNING *',
-      [name, email, phone, address]
-    );
-    return rep.code(201).send(rows[0]);
-  });
+export default async function supplierRoutes(app) {
+  app.get('/', { preHandler: authorize('read') },
+    async (req) => (await req.db.query(`
+      SELECT s.*, json_agg(sf.*) FILTER (WHERE sf.id IS NOT NULL) AS factories
+      FROM suppliers s
+      LEFT JOIN supplier_factories sf ON sf.supplier_id = s.id AND sf.is_active = true
+      WHERE s.is_active = true
+      GROUP BY s.id ORDER BY s.name
+    `)).rows
+  );
+
+  app.get('/:id', { preHandler: authorize('read') },
+    async (req, rep) => {
+      const { rows } = await req.db.query(`
+        SELECT s.*, json_agg(sf.*) FILTER (WHERE sf.id IS NOT NULL) AS factories
+        FROM suppliers s
+        LEFT JOIN supplier_factories sf ON sf.supplier_id = s.id AND sf.is_active = true
+        WHERE s.id = $1 AND s.is_active = true
+        GROUP BY s.id
+      `, [req.params.id]);
+      return rows[0] ?? rep.code(404).send({ error: 'Supplier not found' });
+    }
+  );
+
+  app.post('/', { preHandler: authorize('create') },
+    async (req, rep) => {
+      const { name, email, phone, address } = req.body;
+      const { rows } = await req.db.query(
+        'INSERT INTO suppliers (name, email, phone, address) VALUES ($1,$2,$3,$4) RETURNING *',
+        [name, email, phone, address]
+      );
+      return rep.code(201).send(rows[0]);
+    }
+  );
+
+  app.patch('/:id', { preHandler: authorize('write') },
+    async (req, rep) => {
+      const allowed = ['name', 'email', 'phone', 'address'];
+      const updates = [];
+      const values  = [];
+      for (const key of allowed) {
+        if (req.body[key] !== undefined) {
+          values.push(req.body[key]);
+          updates.push(`${key} = $${values.length}`);
+        }
+      }
+      if (updates.length === 0) return rep.code(400).send({ error: 'No valid fields provided' });
+      values.push(req.params.id);
+      const { rows } = await req.db.query(
+        `UPDATE suppliers SET ${updates.join(', ')} WHERE id = $${values.length} AND is_active = true RETURNING *`,
+        values
+      );
+      return rows[0] ?? rep.code(404).send({ error: 'Supplier not found' });
+    }
+  );
+
+  app.delete('/:id', { preHandler: authorize('delete') },
+    async (req, rep) => {
+      const { rows: [{ count }] } = await req.db.query(
+        `SELECT COUNT(*) FROM purchase_orders WHERE supplier_id = $1 AND status NOT IN ('RECEIVED', 'CANCELLED')`,
+        [req.params.id]
+      );
+      if (parseInt(count) > 0) {
+        return rep.code(409).send({ error: 'Cannot deactivate supplier with open purchase orders' });
+      }
+      const { rows } = await req.db.query(
+        'UPDATE suppliers SET is_active = false WHERE id = $1 AND is_active = true RETURNING id',
+        [req.params.id]
+      );
+      return rows[0] ? { success: true } : rep.code(404).send({ error: 'Supplier not found' });
+    }
+  );
 }
