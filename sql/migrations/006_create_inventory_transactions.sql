@@ -22,6 +22,6 @@ CREATE TABLE inventory_transactions (
     purchase_order_id   INT REFERENCES purchase_orders(id),
     sales_order_id      INT REFERENCES sales_orders(id),
     notes               TEXT,
-    created_by          INT,  -- FK to a users table if you add one
+    created_by          INT REFERENCES users(id),-- FK to a users table if you add one
     created_at          TIMESTAMPTZ DEFAULT now()
 );
