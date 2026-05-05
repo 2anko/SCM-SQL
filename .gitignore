@@ -21,3 +21,4 @@
 .mailmap
 sql/seeds/
 backend/node_modules/
+.claude
