@@ -2,36 +2,64 @@
 import { getStockLevels, recordTransaction, transferStock, getTransactionHistory } from '../queries/inventory.js';
 import { authorize } from '../middleware/authorize.js';
 
+const TXN_TYPES = ['RECEIPT', 'SHIPMENT', 'TRANSFER_IN', 'TRANSFER_OUT', 'ADJUSTMENT', 'RETURN_IN', 'RETURN_OUT'];
+
+const transactionSchema = {
+  body: {
+    type: 'object',
+    required: ['txn_type', 'item_id', 'warehouse_id', 'quantity'],
+    additionalProperties: false,
+    properties: {
+      txn_type:             { type: 'string', enum: TXN_TYPES },
+      item_id:              { type: 'integer' },
+      warehouse_id:         { type: 'integer' },
+      related_warehouse_id: { type: 'integer' },
+      quantity:             { type: 'number', exclusiveMinimum: 0 },
+      purchase_order_id:    { type: 'integer' },
+      sales_order_id:       { type: 'integer' },
+      notes:                { type: 'string' },
+    },
+  },
+};
+
+const transferSchema = {
+  body: {
+    type: 'object',
+    required: ['item_id', 'from_warehouse_id', 'to_warehouse_id', 'quantity'],
+    additionalProperties: false,
+    properties: {
+      item_id:           { type: 'integer' },
+      from_warehouse_id: { type: 'integer' },
+      to_warehouse_id:   { type: 'integer' },
+      quantity:          { type: 'number', exclusiveMinimum: 0 },
+      notes:             { type: 'string' },
+    },
+  },
+};
+
 export default async function inventoryRoutes(app) {
-  // GET /inventory?warehouseId=1&itemId=2
-  app.get('/',        { preHandler: authorize('read') },
+  app.get('/', { preHandler: authorize('read') },
     async (req) => {
       const { warehouseId, itemId } = req.query;
       return getStockLevels(req.db, { warehouseId, itemId });
     }
   );
-
-  // GET /inventory/history?itemId=1&warehouseId=2&limit=50
   app.get('/history', { preHandler: authorize('read') },
     async (req) => {
       const { itemId, warehouseId, limit } = req.query;
       return getTransactionHistory(req.db, { itemId, warehouseId, limit });
     }
   );
-
-  // POST /inventory/transaction — adjustments, returns, etc. (create new record)
-  app.post('/transaction', { preHandler: authorize('create') },
+  app.post('/transaction', { preHandler: authorize('create'), schema: transactionSchema },
     async (req, rep) => {
-      const txn = await recordTransaction(req.db, req.body);
+      const txn = await recordTransaction(req.db, { ...req.body, created_by: req.user.userId });
       return rep.code(201).send(txn);
     }
   );
-
-  // POST /inventory/transfer — moves stock between warehouses (create new record)
-  app.post('/transfer',    { preHandler: authorize('create') },
+  app.post('/transfer', { preHandler: authorize('create'), schema: transferSchema },
     async (req, rep) => {
       try {
-        return rep.code(201).send(await transferStock(req.db, req.body));
+        return rep.code(201).send(await transferStock(req.db, { ...req.body, created_by: req.user.userId }));
       } catch (err) {
         return rep.code(400).send({ error: err.message });
       }

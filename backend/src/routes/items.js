@@ -2,6 +2,36 @@
 import { getAllItems, getItemById, createItem, updateItem, deleteItem } from '../queries/items.js';
 import { authorize } from '../middleware/authorize.js';
 
+const createSchema = {
+  body: {
+    type: 'object',
+    required: ['sku', 'name'],
+    additionalProperties: false,
+    properties: {
+      sku:             { type: 'string', minLength: 1 },
+      name:            { type: 'string', minLength: 1 },
+      description:     { type: 'string' },
+      unit_of_measure: { type: 'string' },
+      unit_cost:       { type: 'number', minimum: 0 },
+      unit_price:      { type: 'number', minimum: 0 },
+    },
+  },
+};
+
+const updateSchema = {
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      name:            { type: 'string', minLength: 1 },
+      description:     { type: 'string' },
+      unit_of_measure: { type: 'string' },
+      unit_cost:       { type: 'number', minimum: 0 },
+      unit_price:      { type: 'number', minimum: 0 },
+    },
+  },
+};
+
 export default async function itemRoutes(app) {
   app.get('/',      { preHandler: authorize('read') },
     async (req) => getAllItems(req.db)
@@ -12,10 +42,10 @@ export default async function itemRoutes(app) {
       return item ?? rep.code(404).send({ error: 'Item not found' });
     }
   );
-  app.post('/',     { preHandler: authorize('create') },
+  app.post('/',     { preHandler: authorize('create'), schema: createSchema },
     async (req, rep) => rep.code(201).send(await createItem(req.db, req.body))
   );
-  app.patch('/:id', { preHandler: authorize('write') },
+  app.patch('/:id', { preHandler: authorize('write'), schema: updateSchema },
     async (req, rep) => {
       const item = await updateItem(req.db, req.params.id, req.body);
       return item ?? rep.code(404).send({ error: 'Item not found' });

@@ -1,6 +1,33 @@
 // routes/suppliers.js
 import { authorize } from '../middleware/authorize.js';
 
+const createSchema = {
+  body: {
+    type: 'object',
+    required: ['name'],
+    additionalProperties: false,
+    properties: {
+      name:    { type: 'string', minLength: 1 },
+      email:   { type: 'string', format: 'email' },
+      phone:   { type: 'string' },
+      address: { type: 'string' },
+    },
+  },
+};
+
+const updateSchema = {
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      name:    { type: 'string', minLength: 1 },
+      email:   { type: 'string', format: 'email' },
+      phone:   { type: 'string' },
+      address: { type: 'string' },
+    },
+  },
+};
+
 export default async function supplierRoutes(app) {
   app.get('/', { preHandler: authorize('read') },
     async (req) => (await req.db.query(`
@@ -11,7 +38,6 @@ export default async function supplierRoutes(app) {
       GROUP BY s.id ORDER BY s.name
     `)).rows
   );
-
   app.get('/:id', { preHandler: authorize('read') },
     async (req, rep) => {
       const { rows } = await req.db.query(`
@@ -24,8 +50,7 @@ export default async function supplierRoutes(app) {
       return rows[0] ?? rep.code(404).send({ error: 'Supplier not found' });
     }
   );
-
-  app.post('/', { preHandler: authorize('create') },
+  app.post('/', { preHandler: authorize('create'), schema: createSchema },
     async (req, rep) => {
       const { name, email, phone, address } = req.body;
       const { rows } = await req.db.query(
@@ -35,8 +60,7 @@ export default async function supplierRoutes(app) {
       return rep.code(201).send(rows[0]);
     }
   );
-
-  app.patch('/:id', { preHandler: authorize('write') },
+  app.patch('/:id', { preHandler: authorize('write'), schema: updateSchema },
     async (req, rep) => {
       const allowed = ['name', 'email', 'phone', 'address'];
       const updates = [];
@@ -56,7 +80,6 @@ export default async function supplierRoutes(app) {
       return rows[0] ?? rep.code(404).send({ error: 'Supplier not found' });
     }
   );
-
   app.delete('/:id', { preHandler: authorize('delete') },
     async (req, rep) => {
       const { rows: [{ count }] } = await req.db.query(

@@ -1,13 +1,37 @@
 // routes/warehouses.js
 import { authorize } from '../middleware/authorize.js';
 
+const createSchema = {
+  body: {
+    type: 'object',
+    required: ['name'],
+    additionalProperties: false,
+    properties: {
+      name:    { type: 'string', minLength: 1 },
+      address: { type: 'string' },
+      country: { type: 'string' },
+    },
+  },
+};
+
+const updateSchema = {
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      name:    { type: 'string', minLength: 1 },
+      address: { type: 'string' },
+      country: { type: 'string' },
+    },
+  },
+};
+
 export default async function warehouseRoutes(app) {
   app.get('/', { preHandler: authorize('read') },
     async (req) => (await req.db.query(
       'SELECT * FROM warehouses WHERE is_active = true ORDER BY name'
     )).rows
   );
-
   app.get('/:id', { preHandler: authorize('read') },
     async (req, rep) => {
       const { rows } = await req.db.query(
@@ -17,8 +41,7 @@ export default async function warehouseRoutes(app) {
       return rows[0] ?? rep.code(404).send({ error: 'Warehouse not found' });
     }
   );
-
-  app.post('/', { preHandler: authorize('create') },
+  app.post('/', { preHandler: authorize('create'), schema: createSchema },
     async (req, rep) => {
       const { name, address, country } = req.body;
       const { rows } = await req.db.query(
@@ -28,8 +51,7 @@ export default async function warehouseRoutes(app) {
       return rep.code(201).send(rows[0]);
     }
   );
-
-  app.patch('/:id', { preHandler: authorize('write') },
+  app.patch('/:id', { preHandler: authorize('write'), schema: updateSchema },
     async (req, rep) => {
       const allowed = ['name', 'address', 'country'];
       const updates = [];
@@ -49,7 +71,6 @@ export default async function warehouseRoutes(app) {
       return rows[0] ?? rep.code(404).send({ error: 'Warehouse not found' });
     }
   );
-
   app.delete('/:id', { preHandler: authorize('delete') },
     async (req, rep) => {
       const { rows: [{ count }] } = await req.db.query(
