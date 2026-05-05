@@ -100,7 +100,7 @@ export async function updatePurchaseOrderStatus(db, id, status) {
  * Receive goods against a PO line.
  * Updates quantity_received, auto-advances PO status, and triggers an inventory RECEIPT.
  */
-export async function receivePurchaseOrderLine(db, { po_id, line_id, quantity_received, warehouse_id }) {
+export async function receivePurchaseOrderLine(db, { po_id, line_id, quantity_received, warehouse_id, created_by = null }) {
   const client = await db.connect();
   try {
     await client.query('BEGIN');
@@ -118,9 +118,9 @@ export async function receivePurchaseOrderLine(db, { po_id, line_id, quantity_re
     // Record inventory receipt
     await client.query(`
       INSERT INTO inventory_transactions
-        (txn_type, item_id, warehouse_id, quantity, purchase_order_id)
-      VALUES ('RECEIPT', $1, $2, $3, $4)
-    `, [line.item_id, warehouse_id, quantity_received, po_id]);
+        (txn_type, item_id, warehouse_id, quantity, purchase_order_id, created_by)
+      VALUES ('RECEIPT', $1, $2, $3, $4, $5)
+    `, [line.item_id, warehouse_id, quantity_received, po_id, created_by]);
 
     await client.query(`
       INSERT INTO inventory (warehouse_id, item_id, quantity)

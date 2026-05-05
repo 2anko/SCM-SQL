@@ -82,7 +82,7 @@ export async function createSalesOrder(db, { customer_id, shipping_address, expe
  * Ship goods against a SO line.
  * Updates quantity_shipped, auto-advances SO status, and triggers an inventory SHIPMENT.
  */
-export async function shipSalesOrderLine(db, { so_id, line_id, quantity_shipped, warehouse_id }) {
+export async function shipSalesOrderLine(db, { so_id, line_id, quantity_shipped, warehouse_id, created_by = null }) {
   const client = await db.connect();
   try {
     await client.query('BEGIN');
@@ -113,9 +113,9 @@ export async function shipSalesOrderLine(db, { so_id, line_id, quantity_shipped,
     // Record inventory shipment (deduct stock)
     await client.query(`
       INSERT INTO inventory_transactions
-        (txn_type, item_id, warehouse_id, quantity, sales_order_id)
-      VALUES ('SHIPMENT', $1, $2, $3, $4)
-    `, [line.item_id, warehouse_id, quantity_shipped, so_id]);
+        (txn_type, item_id, warehouse_id, quantity, sales_order_id, created_by)
+      VALUES ('SHIPMENT', $1, $2, $3, $4, $5)
+    `, [line.item_id, warehouse_id, quantity_shipped, so_id, created_by]);
 
     await client.query(`
       UPDATE inventory SET quantity = quantity - $1, updated_at = now()
