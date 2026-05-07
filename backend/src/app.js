@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import Fastify from 'fastify';
+import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
 import bcrypt from 'bcryptjs';
 
@@ -18,6 +19,9 @@ import userRoutes              from './routes/users.js';
 import supplierFactoryRoutes   from './routes/supplierFactories.js';
 
 const app = Fastify({ logger: true });
+
+// ── CORS ──────────────────────────────────────────────────────────────────────
+await app.register(cors, { origin: true });
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 app.register(jwt, { secret: process.env.JWT_SECRET });

@@ -12,6 +12,11 @@ export const db = new Pool({
   connectionTimeoutMillis: 5000,
 });
 
+// Set search_path so all queries find the scm schema without prefixing
+db.on('connect', (client) => {
+  client.query('SET search_path TO scm, public');
+});
+
 export async function closeDb() {
   await db.end();
 }
