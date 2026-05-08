@@ -21,7 +21,11 @@ import supplierFactoryRoutes   from './routes/supplierFactories.js';
 const app = Fastify({ logger: true });
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
-await app.register(cors, { origin: true });
+await app.register(cors, {
+  origin: true,
+  methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+});
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 app.register(jwt, { secret: process.env.JWT_SECRET });

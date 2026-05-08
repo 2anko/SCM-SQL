@@ -5,6 +5,7 @@
 // delete  → DELETE endpoints
 // manage_users → /users endpoints only
 const PERMISSIONS = {
+    dev:             ['read', 'create', 'write', 'delete', 'manage_users'],
     head_manager:    ['read'],
     section_manager: ['read', 'write', 'delete'],
     employee:        ['read', 'create'],

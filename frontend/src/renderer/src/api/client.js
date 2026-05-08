@@ -5,7 +5,8 @@ function getToken() {
 }
 
 async function request(method, path, body) {
-  const headers = { 'Content-Type': 'application/json' }
+  const headers = {}
+  if (body !== undefined) headers['Content-Type'] = 'application/json'
   const token = getToken()
   if (token) headers['Authorization'] = `Bearer ${token}`
 
@@ -22,7 +23,7 @@ async function request(method, path, body) {
 
   if (!res.ok) {
     const data = await res.json().catch(() => ({}))
-    throw new Error(data.error || `Request failed (${res.status})`)
+    throw new Error(data.message || data.error || `Request failed (${res.status})`)
   }
 
   return res.status === 204 ? null : res.json()
