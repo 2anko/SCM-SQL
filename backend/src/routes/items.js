@@ -1,5 +1,7 @@
 // routes/items.js
 import { getAllItems, getItemById, createItem, updateItem, deleteItem } from '../queries/items.js';
+import { getSuppliersByItem } from '../queries/supplierItems.js';
+import { getCustomersByItem } from '../queries/customerItems.js';
 import { authorize } from '../middleware/authorize.js';
 
 const createSchema = {
@@ -50,6 +52,12 @@ export default async function itemRoutes(app) {
       const item = await updateItem(req.db, req.params.id, req.body);
       return item ?? rep.code(404).send({ error: 'Item not found' });
     }
+  );
+  app.get('/:id/suppliers', { preHandler: authorize('read') },
+    async (req) => getSuppliersByItem(req.db, req.params.id)
+  );
+  app.get('/:id/customers', { preHandler: authorize('read') },
+    async (req) => getCustomersByItem(req.db, req.params.id)
   );
   app.delete('/:id', { preHandler: authorize('delete') },
     async (req, rep) => {

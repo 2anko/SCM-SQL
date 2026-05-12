@@ -3,7 +3,9 @@ import {
   getAllSalesOrders,
   getSalesOrderById,
   createSalesOrder,
-  shipSalesOrderLine,
+  updateSalesOrder,
+  updateSalesOrderStatus,
+  shipSalesOrder,
 } from '../queries/salesOrders.js';
 import { authorize } from '../middleware/authorize.js';
 
@@ -37,15 +39,40 @@ const createSchema = {
   },
 };
 
-const shipSchema = {
+const editSchema = {
   body: {
     type: 'object',
-    required: ['line_id', 'quantity_shipped', 'warehouse_id'],
     additionalProperties: false,
     properties: {
-      line_id:          { type: 'integer' },
-      quantity_shipped: { type: 'number', exclusiveMinimum: 0 },
-      warehouse_id:     { type: 'integer' },
+      customer_id:      { type: 'integer' },
+      shipping_address: { type: ['string', 'null'] },
+      expected_date:    { type: ['string', 'null'], format: 'date' },
+      lines: {
+        type: 'array',
+        minItems: 1,
+        items: {
+          type: 'object',
+          required: ['item_id', 'quantity_ordered', 'unit_price'],
+          additionalProperties: false,
+          properties: {
+            item_id:             { type: 'integer' },
+            quantity_ordered:    { type: 'number', exclusiveMinimum: 0 },
+            unit_price:          { type: 'number', minimum: 0 },
+            source_warehouse_id: { type: 'integer' },
+          },
+        },
+      },
+    },
+  },
+};
+
+const updateStatusSchema = {
+  body: {
+    type: 'object',
+    required: ['status'],
+    additionalProperties: false,
+    properties: {
+      status: { type: 'string', enum: SO_STATUSES },
     },
   },
 };
@@ -72,14 +99,34 @@ export default async function soRoutes(app) {
   app.post('/', { preHandler: authorize('create'), schema: createSchema },
     async (req, rep) => rep.code(201).send(await createSalesOrder(req.db, req.body))
   );
-  app.post('/:id/ship', { preHandler: authorize('write'), schema: shipSchema },
+  app.patch('/:id', { preHandler: authorize('write'), schema: editSchema },
     async (req, rep) => {
       try {
-        return rep.code(201).send(await shipSalesOrderLine(req.db, {
-          so_id: req.params.id,
+        const so = await updateSalesOrder(req.db, req.params.id, req.body);
+        return so ?? rep.code(404).send({ error: 'Sales order not found' });
+      } catch (err) {
+        return rep.code(400).send({ error: err.message });
+      }
+    }
+  );
+  app.patch('/:id/status', { preHandler: authorize('write'), schema: updateStatusSchema },
+    async (req, rep) => {
+      try {
+        const so = await updateSalesOrderStatus(req.db, req.params.id, req.body.status);
+        return so ?? rep.code(404).send({ error: 'Sales order not found' });
+      } catch (err) {
+        return rep.code(400).send({ error: err.message });
+      }
+    }
+  );
+  app.post('/:id/ship', { preHandler: authorize('write') },
+    async (req, rep) => {
+      try {
+        const so = await shipSalesOrder(req.db, {
+          id:         req.params.id,
           created_by: req.user.userId,
-          ...req.body,
-        }));
+        });
+        return so ?? rep.code(404).send({ error: 'Sales order not found' });
       } catch (err) {
         return rep.code(400).send({ error: err.message });
       }

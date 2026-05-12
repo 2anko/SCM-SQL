@@ -17,6 +17,8 @@ import poRoutes                from './routes/purchaseOrders.js';
 import soRoutes                from './routes/salesOrders.js';
 import userRoutes              from './routes/users.js';
 import supplierFactoryRoutes   from './routes/supplierFactories.js';
+import supplierItemRoutes      from './routes/supplierItems.js';
+import customerItemRoutes      from './routes/customerItems.js';
 
 const app = Fastify({ logger: true });
 
@@ -76,7 +78,9 @@ app.register(itemRoutes,            { prefix: '/items' });
 app.register(warehouseRoutes,       { prefix: '/warehouses' });
 app.register(supplierRoutes,        { prefix: '/suppliers' });
 app.register(supplierFactoryRoutes, { prefix: '/suppliers' });
+app.register(supplierItemRoutes,    { prefix: '/suppliers' });
 app.register(customerRoutes,        { prefix: '/customers' });
+app.register(customerItemRoutes,    { prefix: '/customers' });
 app.register(inventoryRoutes,       { prefix: '/inventory' });
 app.register(poRoutes,              { prefix: '/purchase-orders' });
 app.register(soRoutes,              { prefix: '/sales-orders' });

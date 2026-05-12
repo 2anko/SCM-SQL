@@ -322,13 +322,18 @@ export default function Suppliers() {
   const [saving, setSaving]             = useState(false)
   const [error, setError]               = useState('')
   const [factoriesFor, setFactoriesFor] = useState(null)
+  const [itemsFor, setItemsFor]         = useState(null)
+  const [allItems, setAllItems]         = useState([])
 
   async function load() {
     setLoading(true)
     try { setSuppliers(await api.get('/suppliers')) }
     finally { setLoading(false) }
   }
-  useEffect(() => { load() }, [])
+  async function loadItems() {
+    setAllItems(await api.get('/items'))
+  }
+  useEffect(() => { load(); loadItems() }, [])
 
   function openAdd() {
     setForm({ ...EMPTY_SUPPLIER_FORM, factories: [] })
@@ -417,6 +422,9 @@ export default function Suppliers() {
           <Button size="sm" variant="outline" onClick={e => { e.stopPropagation(); setFactoriesFor(r) }}>
             Factories
           </Button>
+          <Button size="sm" variant="outline" onClick={e => { e.stopPropagation(); setItemsFor(r) }}>
+            Items
+          </Button>
           {canEdit   && <Button size="sm" variant="outline"     onClick={e => { e.stopPropagation(); openEdit(r) }}>Edit</Button>}
           {canDelete && <Button size="sm" variant="destructive" onClick={e => { e.stopPropagation(); openDelete(r) }}>Delete</Button>}
         </div>
@@ -462,6 +470,198 @@ export default function Suppliers() {
           onClose={() => { setFactoriesFor(null); load() }}
         />
       )}
+
+      {itemsFor && (
+        <SupplierItemsDialog
+          supplier={itemsFor}
+          allItems={allItems}
+          canCreate={canCreate}
+          canEdit={canEdit}
+          canDelete={canDelete}
+          onClose={() => setItemsFor(null)}
+        />
+      )}
     </div>
+  )
+}
+
+// ── Supplier Items dialog (per-supplier item costs) ──────────────────────────
+
+const EMPTY_SI = { item_id: '', unit_cost: '', supplier_sku: '', lead_time_days: '', is_preferred: false, notes: '' }
+
+function SupplierItemsDialog({ supplier, allItems, canCreate, canEdit, canDelete, onClose }) {
+  const [rows, setRows]     = useState([])
+  const [loading, setLoading] = useState(true)
+  const [dialog, setDialog] = useState(null) // { mode: 'add'|'edit'|'delete', record? }
+  const [form, setForm]     = useState(EMPTY_SI)
+  const [saving, setSaving] = useState(false)
+  const [error, setError]   = useState('')
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try { setRows(await api.get(`/suppliers/${supplier.id}/items`)) }
+    finally { setLoading(false) }
+  }, [supplier.id])
+  useEffect(() => { load() }, [load])
+
+  // Items not yet linked to this supplier — for the Add picker
+  const linkedIds = new Set(rows.map(r => r.item_id))
+  const availableItems = allItems.filter(i => !linkedIds.has(i.id))
+
+  function openAdd() {
+    setForm(EMPTY_SI); setError(''); setDialog({ mode: 'add' })
+  }
+  function openEdit(r) {
+    setForm({
+      item_id:        String(r.item_id),
+      unit_cost:      String(r.unit_cost),
+      supplier_sku:   r.supplier_sku   || '',
+      lead_time_days: r.lead_time_days != null ? String(r.lead_time_days) : '',
+      is_preferred:   !!r.is_preferred,
+      notes:          r.notes          || '',
+    })
+    setError(''); setDialog({ mode: 'edit', record: r })
+  }
+  function openDelete(r) {
+    setError(''); setDialog({ mode: 'delete', record: r })
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault(); setSaving(true); setError('')
+    try {
+      const itemId = dialog.mode === 'edit' ? dialog.record.item_id : Number(form.item_id)
+      const body = {
+        unit_cost:      Number(form.unit_cost),
+        supplier_sku:   form.supplier_sku.trim() || null,
+        lead_time_days: form.lead_time_days === '' ? null : Number(form.lead_time_days),
+        is_preferred:   form.is_preferred,
+        notes:          form.notes.trim() || null,
+      }
+      await api.put(`/suppliers/${supplier.id}/items/${itemId}`, body)
+      setDialog(null); load()
+    } catch (err) { setError(err.message) }
+    finally { setSaving(false) }
+  }
+
+  async function handleDelete() {
+    setSaving(true); setError('')
+    try {
+      await api.delete(`/suppliers/${supplier.id}/items/${dialog.record.item_id}`)
+      setDialog(null); load()
+    } catch (err) { setError(err.message) }
+    finally { setSaving(false) }
+  }
+
+  const columns = [
+    { header: 'SKU',         render: r => r.sku },
+    { header: 'Item',        render: r => r.item_name },
+    { header: 'Cost',        render: r => `$${Number(r.unit_cost).toFixed(2)}` },
+    { header: 'Supplier SKU',render: r => r.supplier_sku || '—' },
+    { header: 'Lead Time',   render: r => r.lead_time_days != null ? `${r.lead_time_days}d` : '—' },
+    { header: 'Preferred',   render: r => r.is_preferred ? '★' : '' },
+    ...(canEdit || canDelete ? [{
+      header: 'Actions',
+      render: r => (
+        <div className="flex gap-2">
+          {canEdit   && <Button size="sm" variant="outline"     onClick={e => { e.stopPropagation(); openEdit(r) }}>Edit</Button>}
+          {canDelete && <Button size="sm" variant="destructive" onClick={e => { e.stopPropagation(); openDelete(r) }}>Delete</Button>}
+        </div>
+      ),
+    }] : []),
+  ]
+
+  return (
+    <>
+      <Dialog open onOpenChange={open => !open && onClose()}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Items supplied — {supplier.name}</DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-gray-500">
+            Costs here override the catalogue default for purchase orders from this supplier.
+          </p>
+          <div className="space-y-4">
+            {canCreate && (
+              <div className="flex justify-end">
+                <Button size="sm" onClick={openAdd} disabled={availableItems.length === 0}>
+                  {availableItems.length === 0 ? 'All items already linked' : 'Add Item'}
+                </Button>
+              </div>
+            )}
+            <DataTable columns={columns} data={rows} isLoading={loading} emptyMessage="No items linked yet" />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={onClose}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {(dialog?.mode === 'add' || dialog?.mode === 'edit') && (
+        <Dialog open onOpenChange={open => !open && setDialog(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{dialog.mode === 'add' ? 'Link Item' : `Edit — ${dialog.record.sku} ${dialog.record.item_name}`}</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {dialog.mode === 'add' && (
+                <div>
+                  <Label>Item *</Label>
+                  <select className="mt-1 w-full h-9 rounded-md border border-input bg-transparent px-3 text-sm" value={form.item_id} onChange={e => setForm(p => ({ ...p, item_id: e.target.value }))} required>
+                    <option value="">Select…</option>
+                    {availableItems.map(i => <option key={i.id} value={i.id}>{i.sku} — {i.name}</option>)}
+                  </select>
+                </div>
+              )}
+              <div>
+                <Label>Unit Cost *</Label>
+                <Input className="mt-1" type="number" step="0.01" min="0" value={form.unit_cost} onChange={e => setForm(p => ({ ...p, unit_cost: e.target.value }))} required />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Supplier SKU</Label>
+                  <Input className="mt-1" value={form.supplier_sku} onChange={e => setForm(p => ({ ...p, supplier_sku: e.target.value }))} placeholder="their part number" />
+                </div>
+                <div>
+                  <Label>Lead Time (days)</Label>
+                  <Input className="mt-1" type="number" min="0" value={form.lead_time_days} onChange={e => setForm(p => ({ ...p, lead_time_days: e.target.value }))} />
+                </div>
+              </div>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={form.is_preferred} onChange={e => setForm(p => ({ ...p, is_preferred: e.target.checked }))} />
+                Preferred supplier for this item
+              </label>
+              <div>
+                <Label>Notes</Label>
+                <Input className="mt-1" value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} />
+              </div>
+              {error && <p className="text-sm text-red-600">{error}</p>}
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setDialog(null)}>Cancel</Button>
+                <Button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {dialog?.mode === 'delete' && (
+        <Dialog open onOpenChange={open => !open && setDialog(null)}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Unlink Item</DialogTitle></DialogHeader>
+            <p className="text-sm text-gray-600">
+              Remove <strong>{dialog.record.sku} {dialog.record.item_name}</strong> from this supplier's catalogue?
+              PO history is not affected.
+            </p>
+            {error && <p className="text-sm text-red-600">{error}</p>}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDialog(null)}>Cancel</Button>
+              <Button variant="destructive" onClick={handleDelete} disabled={saving}>
+                {saving ? 'Removing…' : 'Remove'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
   )
 }
