@@ -1,6 +1,6 @@
-# SCM — Supply Chain Management (WIP)
+# SCM — Supply Chain Management
 
-A desktop application for managing a company's supply chain. Built with Electron (frontend), Node.js/Fastify (backend), and PostgreSQL (database). Packaged as a self-contained `.exe` — no cloud, no subscriptions.
+A desktop application for managing a company's supply chain. Built with Electron + React (frontend), Node.js/Fastify (backend), and PostgreSQL (database). Packaged as a self-contained `.exe` — no cloud, no subscriptions.
 
 ---
 

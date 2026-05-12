@@ -76,7 +76,7 @@ export default async function customerRoutes(app) {
   app.delete('/:id', { preHandler: authorize('delete') },
     async (req, rep) => {
       const { rows: [{ count }] } = await req.db.query(
-        `SELECT COUNT(*) FROM sales_orders WHERE customer_id = $1 AND status NOT IN ('DELIVERED', 'CANCELLED')`,
+        `SELECT COUNT(*) FROM sales_orders WHERE customer_id = $1 AND status NOT IN ('SHIPPED', 'DELIVERED', 'CANCELLED')`,
         [req.params.id]
       );
       if (parseInt(count) > 0) {

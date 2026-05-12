@@ -49,20 +49,75 @@ export async function updateItem(db, id, fields) {
   return rows[0] ?? null;
 }
 
+/**
+ * Delete an item.
+ *
+ * Hard blockers (real history that must never be lost):
+ *   - any inventory_transactions row
+ *   - any inventory row with quantity > 0
+ *   - any PO line whose PO is NOT cancelled
+ *   - any SO line whose SO is NOT cancelled
+ *
+ * If only cancelled-order lines and zero-stock inventory rows reference the item,
+ * we sweep those out inside a transaction and then delete the item.
+ */
 export async function deleteItem(db, id) {
-  const { rows: [{ total }] } = await db.query(`
-    SELECT (
-      (SELECT COUNT(*) FROM inventory_transactions WHERE item_id = $1) +
-      (SELECT COUNT(*) FROM purchase_order_lines  WHERE item_id = $1) +
-      (SELECT COUNT(*) FROM sales_order_lines     WHERE item_id = $1) +
-      (SELECT COUNT(*) FROM inventory             WHERE item_id = $1)
-    ) AS total
-  `, [id]);
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
 
-  if (parseInt(total) > 0) {
-    throw new Error('Cannot delete item that is referenced by existing orders or inventory records');
+    // Hard blockers
+    const { rows: [counts] } = await client.query(`
+      SELECT
+        (SELECT COUNT(*) FROM inventory_transactions WHERE item_id = $1)                          AS txn_count,
+        (SELECT COUNT(*) FROM inventory              WHERE item_id = $1 AND quantity > 0)         AS stock_count,
+        (SELECT COUNT(*) FROM purchase_order_lines pol
+           JOIN purchase_orders po ON po.id = pol.po_id
+          WHERE pol.item_id = $1 AND po.status <> 'CANCELLED')                                    AS open_po_count,
+        (SELECT COUNT(*) FROM sales_order_lines sol
+           JOIN sales_orders so ON so.id = sol.so_id
+          WHERE sol.item_id = $1 AND so.status <> 'CANCELLED')                                    AS open_so_count
+    `, [id]);
+
+    if (parseInt(counts.txn_count) > 0) {
+      throw new Error('Cannot delete: this item has inventory transaction history.');
+    }
+    if (parseInt(counts.stock_count) > 0) {
+      throw new Error('Cannot delete: this item still has stock on hand.');
+    }
+    if (parseInt(counts.open_po_count) > 0) {
+      throw new Error('Cannot delete: this item is on a non-cancelled purchase order.');
+    }
+    if (parseInt(counts.open_so_count) > 0) {
+      throw new Error('Cannot delete: this item is on a non-cancelled sales order.');
+    }
+
+    // Sweep out the soft references — lines on cancelled orders + empty inventory rows
+    await client.query(`
+      DELETE FROM purchase_order_lines
+       WHERE item_id = $1
+         AND po_id IN (SELECT id FROM purchase_orders WHERE status = 'CANCELLED')
+    `, [id]);
+
+    await client.query(`
+      DELETE FROM sales_order_lines
+       WHERE item_id = $1
+         AND so_id IN (SELECT id FROM sales_orders WHERE status = 'CANCELLED')
+    `, [id]);
+
+    await client.query(
+      `DELETE FROM inventory WHERE item_id = $1 AND quantity = 0`,
+      [id]
+    );
+
+    const { rowCount } = await client.query(`DELETE FROM items WHERE id = $1`, [id]);
+
+    await client.query('COMMIT');
+    return rowCount > 0;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
   }
-
-  const { rowCount } = await db.query(`DELETE FROM items WHERE id = $1`, [id]);
-  return rowCount > 0;
 }

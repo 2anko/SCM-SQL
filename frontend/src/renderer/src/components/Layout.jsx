@@ -69,7 +69,7 @@ export default function Layout({ children }) {
           {navItems.map((item) => (
             <NavItem key={item.to} {...item} />
           ))}
-          {user?.role === 'it_service' && (
+          {(user?.role === 'it_service' || user?.role === 'dev') && (
             <NavItem to="/users" label="Users" icon={UserCog} />
           )}
         </nav>
