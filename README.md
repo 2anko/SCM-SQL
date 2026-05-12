@@ -14,7 +14,7 @@ Sold as a one-time license to companies that already have a PostgreSQL server. E
 
 | Layer | Technology |
 |---|---|
-| Frontend | Electron (not started) |
+| Frontend | Electron, React, Vite, Tailwind CSS, shadcn/ui |
 | Backend | Node.js, Fastify |
 | Database | PostgreSQL |
 | Auth | JWT + bcrypt |
@@ -45,36 +45,69 @@ Sold as a one-time license to companies that already have a PostgreSQL server. E
 - Inventory operations: stock levels, transaction history, manual adjustments, warehouse transfers
 - Purchase order workflow: create → confirm → receive goods (auto-updates inventory)
 - Sales order workflow: create → confirm → ship goods (auto-updates inventory, checks stock)
+- Per-supplier cost and per-customer price via `supplier_items` / `customer_items` junction tables
 - Request body validation on all routes (required fields, types, enum values)
 - `created_by` tracked on all inventory transactions
 - Business-rule guards on delete (e.g. can't deactivate a warehouse with stock, can't delete a supplier with open POs)
+
+### Frontend (Electron + React)
+
+- **Auth** — login screen with JWT stored in memory; role drives all UI permissions
+- **Dashboard** — live stat cards (open POs/SOs, low-stock items, overdue orders) with recent order feeds
+- **Items** — catalogue with per-item pricing breakdown (all supplier costs + customer prices)
+- **Warehouses** — stock levels per warehouse; create/edit/soft-delete
+- **Suppliers** — full management including nested factories and factory reps; per-supplier item cost management
+- **Customers** — full management with per-customer item price management
+- **Inventory** — current stock levels + full transaction history with warehouse/item filters; transfer and manual adjustment dialogs
+- **Purchase Orders** — multi-line creation (with inline new-item/new-factory shortcuts), DRAFT → SENT → RECEIVED flow, overdue warnings, post-receive cost-update prompt, date-range Summary Report
+- **Sales Orders** — multi-line creation with source warehouse assignment per line, DRAFT → CONFIRMED → SHIPPED flow, atomic stock deduction on ship
+- **Users** — `it_service` only: create accounts, assign roles, reset passwords (self-edit protected)
 
 ---
 
 ## Local development setup
 
-**Prerequisites:** Docker Desktop, Node.js
+**Prerequisites:** Docker Desktop, Node.js 18+
+
+### 1. Database
 
 ```bash
-# 1. Start the database
+# Start the local PostgreSQL container
 docker compose up -d
-
-# 2. Install backend dependencies
-cd backend
-npm install
-
-# 3. Set up environment
-cp .env.example .env
-# Fill in DATABASE_URL and JWT_SECRET in .env
-
-# 4. Apply migrations (run each file in order 001–012 via your DB client)
-
-# 5. Start the backend
-npm run dev
 ```
 
 **Connect a DB client** (e.g. Database Client extension in VSCode):
 - Host: `localhost`, Port: `5433`, Database: `scm`, User: `scm_user`
+
+Apply all migrations in order (001–013) via your DB client or psql.
+
+### 2. Backend
+
+```bash
+cd backend
+npm install
+
+# Copy and fill in environment variables
+cp .env.example .env
+# Set DATABASE_URL and JWT_SECRET in .env
+
+npm run dev
+# Fastify listens on http://localhost:3000
+```
+
+### 3. Frontend (Electron + Vite)
+
+Open a second terminal:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+This starts the Vite dev server and launches the Electron window. Hot-reload is active for all renderer (React) code — save a file and the UI updates instantly without restarting Electron.
+
+> **Note:** The frontend expects the backend at `http://localhost:3000`. If you change the backend port, update `VITE_API_BASE` in `frontend/.env`.
 
 ---
 
@@ -90,8 +123,18 @@ SCM-SQL/
 │       │   └── authorize.js     # RBAC permission checks
 │       ├── queries/             # SQL query functions
 │       └── routes/              # Fastify route handlers
+├── frontend/
+│   ├── electron.vite.config.js  # Vite + Electron build config
+│   └── src/
+│       ├── main/                # Electron main process
+│       ├── preload/             # contextBridge preload script
+│       └── renderer/src/
+│           ├── App.jsx          # root router + auth context
+│           ├── api/             # fetch helpers (api.js)
+│           ├── components/      # shared UI components (shadcn/ui base)
+│           └── pages/           # one file per page (Items, Warehouses, …)
 ├── sql/
-│   ├── migrations/              # schema changes (001–012, run in order)
+│   ├── migrations/              # schema changes (001–013, run in order)
 │   ├── schema/                  # reference schema
 │   └── seeds/                   # sample data for testing
 ├── db/init/                     # bootstrap script (runs on first docker start)
@@ -102,7 +145,6 @@ SCM-SQL/
 
 ## Planned
 
-- **Electron frontend** — the main remaining work; UI for all CRUD operations and workflows
-- **First-run setup** — screen to create the initial `it_service` account on fresh install
-- **Reporting endpoints** — inventory value by warehouse, low stock alerts, PO/SO summaries (built alongside the frontend as screens are designed)
-- **Packaging** — bundle backend + Electron into a single `.exe` using Electron Forge or electron-builder
+- **First-run setup** — screen to create the initial `it_service` account on a fresh install
+- **Low-stock alerts** — configurable reorder-point notifications on the Dashboard
+- **Packaging** — bundle backend + Electron into a single `.exe` using electron-builder
