@@ -2,6 +2,7 @@
 import {
   getAllSalesOrders,
   getSalesOrderById,
+  getSalesOrderSummary,
   createSalesOrder,
   updateSalesOrder,
   updateSalesOrderStatus,
@@ -86,9 +87,23 @@ const listQuerySchema = {
   },
 };
 
+const summaryQuerySchema = {
+  querystring: {
+    type: 'object',
+    required: ['from', 'to'],
+    properties: {
+      from: { type: 'string', format: 'date' },
+      to:   { type: 'string', format: 'date' },
+    },
+  },
+};
+
 export default async function soRoutes(app) {
   app.get('/', { preHandler: authorize('read'), schema: listQuerySchema },
     async (req) => getAllSalesOrders(req.db, { status: req.query.status })
+  );
+  app.get('/summary', { preHandler: authorize('read'), schema: summaryQuerySchema },
+    async (req) => getSalesOrderSummary(req.db, req.query)
   );
   app.get('/:id', { preHandler: authorize('read') },
     async (req, rep) => {

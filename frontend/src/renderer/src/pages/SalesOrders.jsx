@@ -8,6 +8,7 @@ import { Label } from '../components/ui/label'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '../components/ui/dialog'
+import SummaryPieChart from '../components/SummaryPieChart'
 
 const STATUSES = ['DRAFT', 'CONFIRMED', 'PARTIALLY_SHIPPED', 'SHIPPED', 'DELIVERED', 'CANCELLED']
 const STATUS_COLORS = {
@@ -27,6 +28,29 @@ function StatusPill({ status }) {
 function fmt(v) { return v != null && v !== '' ? `$${Number(v).toFixed(2)}` : '—' }
 function fmtDate(s) { return s ? new Date(s).toLocaleDateString() : '—' }
 
+/**
+ * An SO is overdue when it's still DRAFT and its expected_date is at least
+ * one full calendar day in the past. Mirrors the PO overdue logic.
+ */
+function isOverdue(so) {
+  if (so.status !== 'DRAFT' || !so.expected_date) return false
+  const expected = new Date(so.expected_date)
+  if (isNaN(expected)) return false
+  expected.setHours(0, 0, 0, 0)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return (today - expected) / (1000 * 60 * 60 * 24) >= 1
+}
+
+function todayISO() {
+  return new Date().toISOString().split('T')[0]
+}
+function nDaysAgoISO(n) {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  return d.toISOString().split('T')[0]
+}
+
 const EMPTY_LINE = { item_id: '', quantity_ordered: '', unit_price: '', source_warehouse_id: '' }
 
 export default function SalesOrders() {
@@ -43,6 +67,7 @@ export default function SalesOrders() {
   const [items, setItems]           = useState([])
   const [warehouses, setWarehouses] = useState([])
   const [showAdd, setShowAdd]       = useState(false)
+  const [showSummary, setShowSummary] = useState(false)
   const [detailId, setDetailId]     = useState(null)
 
   async function load() {
@@ -60,13 +85,22 @@ export default function SalesOrders() {
   useEffect(() => { loadDropdowns() }, [])
   useEffect(() => { load() }, [statusFilter])
 
+  const overdueCount = sos.filter(isOverdue).length
+
   const columns = [
-    { header: 'SO #',     render: r => `#${r.id}` },
+    { header: 'SO #',     render: r => (
+      <span className="inline-flex items-center gap-1.5">
+        {isOverdue(r) && <span title="Overdue: still in DRAFT past expected date" className="text-red-600">⚠</span>}
+        #{r.id}
+      </span>
+    )},
     { header: 'Customer', accessor: 'customer' },
     { header: 'Status',   render: r => <StatusPill status={r.status} /> },
     { header: 'Lines',    accessor: 'line_count' },
     { header: 'Total',    render: r => fmt(r.total_value) },
-    { header: 'Expected', render: r => fmtDate(r.expected_date) },
+    { header: 'Expected', render: r => (
+      <span className={isOverdue(r) ? 'text-red-600 font-medium' : ''}>{fmtDate(r.expected_date)}</span>
+    )},
     { header: 'Created',  render: r => fmtDate(r.created_at) },
   ]
 
@@ -77,8 +111,18 @@ export default function SalesOrders() {
           <h1 className="text-2xl font-semibold text-gray-900">Sales Orders</h1>
           <p className="mt-1 text-sm text-gray-500">Create and track orders to customers</p>
         </div>
-        {canCreate && <Button onClick={() => setShowAdd(true)}>New Sales Order</Button>}
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setShowSummary(true)}>Summary Report</Button>
+          {canCreate && <Button onClick={() => setShowAdd(true)}>New Sales Order</Button>}
+        </div>
       </div>
+
+      {overdueCount > 0 && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <strong>⚠ {overdueCount} sales order{overdueCount > 1 ? 's are' : ' is'} overdue</strong>
+          {' '}— still in DRAFT status more than a day past its expected date.
+        </div>
+      )}
 
       <div className="flex items-center gap-3">
         <Label className="text-xs text-gray-500">Status</Label>
@@ -120,6 +164,17 @@ export default function SalesOrders() {
           canWrite={canWrite}
           onClose={() => setDetailId(null)}
           onChange={load}
+        />
+      )}
+
+      {showSummary && (
+        <SummaryReportDialog
+          customers={customers}
+          items={items}
+          warehouses={warehouses}
+          canWrite={canWrite}
+          onChange={load}
+          onClose={() => setShowSummary(false)}
         />
       )}
     </div>
@@ -508,6 +563,166 @@ function ShipSODialog({ soId, so, onClose, onSuccess }) {
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
           <Button onClick={handleConfirm} disabled={saving}>{saving ? 'Shipping…' : 'Confirm & Ship'}</Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ── Summary Report dialog ──────────────────────────────────────────────────
+
+function SummaryReportDialog({ customers, items, warehouses, canWrite, onChange, onClose }) {
+  const [from, setFrom]       = useState(nDaysAgoISO(30))
+  const [to, setTo]           = useState(todayISO())
+  const [data, setData]       = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState('')
+  const [drillId, setDrillId] = useState(null) // SO id opened from a summary row
+
+  async function generate(e) {
+    e?.preventDefault()
+    if (!from || !to) return
+    if (from > to) { setError('Start date must be on or before end date.'); return }
+    setLoading(true); setError(''); setData(null)
+    try {
+      const qs = new URLSearchParams({ from, to }).toString()
+      setData(await api.get(`/sales-orders/summary?${qs}`))
+    } catch (err) { setError(err.message) }
+    finally { setLoading(false) }
+  }
+
+  return (
+    <Dialog open onOpenChange={open => !open && onClose()}>
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader><DialogTitle>Sales Order Summary</DialogTitle></DialogHeader>
+
+        <form onSubmit={generate} className="flex items-end gap-3 flex-wrap">
+          <div>
+            <Label>From</Label>
+            <Input className="mt-1" type="date" value={from} onChange={e => setFrom(e.target.value)} required />
+          </div>
+          <div>
+            <Label>To</Label>
+            <Input className="mt-1" type="date" value={to}   onChange={e => setTo(e.target.value)}   required />
+          </div>
+          <div className="flex gap-2">
+            <Button type="submit" disabled={loading}>{loading ? 'Generating…' : 'Generate'}</Button>
+            <Button type="button" variant="outline" onClick={() => { setFrom(nDaysAgoISO(7));  setTo(todayISO()) }}>Last 7 days</Button>
+            <Button type="button" variant="outline" onClick={() => { setFrom(nDaysAgoISO(30)); setTo(todayISO()) }}>Last 30 days</Button>
+            <Button type="button" variant="outline" onClick={() => { setFrom(nDaysAgoISO(90)); setTo(todayISO()) }}>Last 90 days</Button>
+          </div>
+        </form>
+
+        {error && <p className="text-sm text-red-600">{error}</p>}
+
+        {data && (
+          <div className="space-y-6 pt-2">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-white rounded-lg border border-gray-200 p-4">
+                <p className="text-sm text-gray-500">Sales Orders shipped</p>
+                <p className="text-2xl font-bold mt-1 text-purple-600">{data.totals.so_count}</p>
+              </div>
+              <div className="bg-white rounded-lg border border-gray-200 p-4">
+                <p className="text-sm text-gray-500">Total Revenue</p>
+                <p className="text-2xl font-bold mt-1 text-emerald-600">{fmt(data.totals.total_value)}</p>
+              </div>
+            </div>
+
+            <SummaryPieChart data={data.by_item} valueKey="total_value" valueLabel="Revenue" />
+
+            <div>
+              <p className="text-sm font-semibold text-gray-700 mb-2">
+                Items Sold ({data.by_item.length})
+              </p>
+              <div className="rounded-md border border-gray-200 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-xs uppercase text-gray-600">
+                    <tr>
+                      <th className="text-left px-3 py-2">SKU</th>
+                      <th className="text-left px-3 py-2">Item</th>
+                      <th className="text-right px-3 py-2">Quantity</th>
+                      <th className="text-right px-3 py-2">Total Revenue</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.by_item.length === 0 ? (
+                      <tr><td colSpan={4} className="px-3 py-6 text-center text-gray-400">No items sold in this range.</td></tr>
+                    ) : data.by_item.map(r => (
+                      <tr key={r.item_id} className="border-t border-gray-200">
+                        <td className="px-3 py-2">{r.sku}</td>
+                        <td className="px-3 py-2">{r.item}</td>
+                        <td className="px-3 py-2 text-right">{Number(r.total_quantity).toLocaleString()}</td>
+                        <td className="px-3 py-2 text-right">{fmt(r.total_value)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-sm font-semibold text-gray-700 mb-2">
+                Sales Orders in range ({data.sos.length})
+              </p>
+              <div className="rounded-md border border-gray-200 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-xs uppercase text-gray-600">
+                    <tr>
+                      <th className="text-left px-3 py-2">SO #</th>
+                      <th className="text-left px-3 py-2">Customer</th>
+                      <th className="text-left px-3 py-2">Status</th>
+                      <th className="text-right px-3 py-2">Lines</th>
+                      <th className="text-right px-3 py-2">Total</th>
+                      <th className="text-left px-3 py-2">Created</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.sos.length === 0 ? (
+                      <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-400">No SOs in this range.</td></tr>
+                    ) : data.sos.map(s => (
+                      <tr
+                        key={s.id}
+                        className="border-t border-gray-200 cursor-pointer hover:bg-gray-50"
+                        onClick={() => setDrillId(s.id)}
+                        title="Click to view this SO's details"
+                      >
+                        <td className="px-3 py-2">#{s.id}</td>
+                        <td className="px-3 py-2">{s.customer}</td>
+                        <td className="px-3 py-2"><StatusPill status={s.status} /></td>
+                        <td className="px-3 py-2 text-right">{s.line_count}</td>
+                        <td className="px-3 py-2 text-right">{fmt(s.total_value)}</td>
+                        <td className="px-3 py-2">{fmtDate(s.created_at)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Close</Button>
+        </DialogFooter>
+
+        {drillId && (
+          <SODetailDialog
+            soId={drillId}
+            customers={customers}
+            items={items}
+            warehouses={warehouses}
+            canWrite={canWrite}
+            onClose={() => setDrillId(null)}
+            onChange={() => {
+              // Refresh parent list AND re-run this summary so status changes
+              // (ship/cancel) reflect immediately in the report.
+              onChange?.()
+              if (from && to) {
+                const qs = new URLSearchParams({ from, to }).toString()
+                api.get(`/sales-orders/summary?${qs}`).then(setData).catch(() => {})
+              }
+            }}
+          />
+        )}
       </DialogContent>
     </Dialog>
   )

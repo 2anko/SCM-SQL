@@ -1,5 +1,56 @@
 // queries/salesOrders.js
 
+/**
+ * Aggregate SO data for a date range.
+ * `from` and `to` are YYYY-MM-DD strings, both inclusive.
+ * by_item aggregates only SHIPPED orders (realised revenue). The SO list
+ * returns every order in range regardless of status.
+ */
+export async function getSalesOrderSummary(db, { from, to }) {
+  const { rows: byItem } = await db.query(`
+    SELECT
+      i.id   AS item_id,
+      i.sku,
+      i.name AS item,
+      SUM(sol.quantity_ordered)                   AS total_quantity,
+      SUM(sol.quantity_ordered * sol.unit_price)  AS total_value
+    FROM sales_order_lines sol
+    JOIN items i           ON i.id  = sol.item_id
+    JOIN sales_orders so   ON so.id = sol.so_id
+    WHERE so.created_at::date BETWEEN $1::date AND $2::date
+      AND so.status = 'SHIPPED'
+    GROUP BY i.id, i.sku, i.name
+    ORDER BY total_value DESC NULLS LAST
+  `, [from, to]);
+
+  const { rows: sos } = await db.query(`
+    SELECT
+      so.id,
+      c.name AS customer,
+      so.status,
+      so.expected_date,
+      so.created_at,
+      COUNT(sol.id)                              AS line_count,
+      SUM(sol.quantity_ordered * sol.unit_price) AS total_value
+    FROM sales_orders so
+    JOIN customers c ON c.id = so.customer_id
+    LEFT JOIN sales_order_lines sol ON sol.so_id = so.id
+    WHERE so.created_at::date BETWEEN $1::date AND $2::date
+    GROUP BY so.id, c.name
+    ORDER BY so.created_at DESC
+  `, [from, to]);
+
+  const totalValue = byItem.reduce((sum, r) => sum + Number(r.total_value || 0), 0);
+  const soCount    = sos.filter(s => s.status === 'SHIPPED').length;
+
+  return {
+    range:   { from, to },
+    totals:  { so_count: soCount, total_value: totalValue },
+    by_item: byItem,
+    sos,
+  };
+}
+
 export async function getAllSalesOrders(db, { status } = {}) {
   const values = [];
   const where  = status ? (values.push(status), `WHERE so.status = $1`) : '';
