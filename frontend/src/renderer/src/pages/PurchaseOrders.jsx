@@ -8,6 +8,7 @@ import { Label } from '../components/ui/label'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '../components/ui/dialog'
+import SummaryPieChart from '../components/SummaryPieChart'
 
 const STATUSES = ['DRAFT', 'SENT', 'CONFIRMED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED']
 const STATUS_COLORS = {
@@ -176,7 +177,15 @@ export default function PurchaseOrders() {
       )}
 
       {showSummary && (
-        <SummaryReportDialog onClose={() => setShowSummary(false)} />
+        <SummaryReportDialog
+          suppliers={suppliers}
+          items={items}
+          warehouses={warehouses}
+          canWrite={canWrite}
+          onChange={load}
+          onItemsChange={refreshItems}
+          onClose={() => setShowSummary(false)}
+        />
       )}
     </div>
   )
@@ -816,12 +825,13 @@ function CostUpdateDialog({ supplierId, diffs, onClose, onSuccess }) {
 
 // ── Summary Report dialog ──────────────────────────────────────────────────
 
-function SummaryReportDialog({ onClose }) {
+function SummaryReportDialog({ suppliers, items, warehouses, canWrite, onChange, onItemsChange, onClose }) {
   const [from, setFrom]       = useState(nDaysAgoISO(30))
   const [to, setTo]           = useState(todayISO())
   const [data, setData]       = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
+  const [drillId, setDrillId] = useState(null) // PO id opened from a summary row
 
   async function generate(e) {
     e?.preventDefault()
@@ -871,6 +881,8 @@ function SummaryReportDialog({ onClose }) {
                 <p className="text-2xl font-bold mt-1 text-emerald-600">{fmt(data.totals.total_cost)}</p>
               </div>
             </div>
+
+            <SummaryPieChart data={data.by_item} valueKey="total_cost" valueLabel="Cost" />
 
             <div>
               <p className="text-sm font-semibold text-gray-700 mb-2">
@@ -923,7 +935,12 @@ function SummaryReportDialog({ onClose }) {
                     {data.pos.length === 0 ? (
                       <tr><td colSpan={7} className="px-3 py-6 text-center text-gray-400">No POs in this range.</td></tr>
                     ) : data.pos.map(p => (
-                      <tr key={p.id} className="border-t border-gray-200">
+                      <tr
+                        key={p.id}
+                        className="border-t border-gray-200 cursor-pointer hover:bg-gray-50"
+                        onClick={() => setDrillId(p.id)}
+                        title="Click to view this PO's details"
+                      >
                         <td className="px-3 py-2">#{p.id}</td>
                         <td className="px-3 py-2">{p.supplier}</td>
                         <td className="px-3 py-2">{p.factory || '—'}</td>
@@ -943,6 +960,27 @@ function SummaryReportDialog({ onClose }) {
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Close</Button>
         </DialogFooter>
+
+        {drillId && (
+          <PODetailDialog
+            poId={drillId}
+            suppliers={suppliers}
+            items={items}
+            warehouses={warehouses}
+            canWrite={canWrite}
+            onClose={() => setDrillId(null)}
+            onChange={() => {
+              // Refresh the parent list AND re-run the summary so any
+              // status changes (cancel/receive) appear in this report too.
+              onChange?.()
+              if (from && to) {
+                const qs = new URLSearchParams({ from, to }).toString()
+                api.get(`/purchase-orders/summary?${qs}`).then(setData).catch(() => {})
+              }
+            }}
+            onItemsChange={onItemsChange}
+          />
+        )}
       </DialogContent>
     </Dialog>
   )
