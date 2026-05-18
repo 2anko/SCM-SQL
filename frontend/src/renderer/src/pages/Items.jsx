@@ -8,12 +8,9 @@ import { Label } from '../components/ui/label'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '../components/ui/dialog'
+import { money as fmt } from '../lib/format'
 
-const EMPTY = { sku: '', name: '', description: '', unit_of_measure: '', unit_cost: '', unit_price: '' }
-
-function fmt(val) {
-  return val != null && val !== '' ? `$${Number(val).toFixed(2)}` : '—'
-}
+const EMPTY = { sku: '', name: '', description: '', unit_of_measure: '', value: '' }
 
 export default function Items() {
   const { user } = useAuth()
@@ -48,8 +45,7 @@ export default function Items() {
       name: r.name,
       description: r.description || '',
       unit_of_measure: r.unit_of_measure || '',
-      unit_cost:  r.unit_cost  != null ? String(r.unit_cost)  : '',
-      unit_price: r.unit_price != null ? String(r.unit_price) : '',
+      value: r.value != null ? String(r.value) : '',
     })
     setError(''); setDialog({ mode: 'edit', record: r })
   }
@@ -64,8 +60,7 @@ export default function Items() {
         name: form.name.trim(),
         ...(form.description    && { description:     form.description.trim() }),
         ...(form.unit_of_measure && { unit_of_measure: form.unit_of_measure.trim() }),
-        ...(form.unit_cost  !== '' && { unit_cost:  Number(form.unit_cost) }),
-        ...(form.unit_price !== '' && { unit_price: Number(form.unit_price) }),
+        ...(form.value !== '' && { value: Number(form.value) }),
       }
       if (dialog.mode === 'add') { body.sku = form.sku.trim(); await api.post('/items', body) }
       else                       { await api.patch(`/items/${dialog.record.id}`, body) }
@@ -90,8 +85,7 @@ export default function Items() {
     { header: 'Name',        accessor: 'name' },
     { header: 'Description', render: r => r.description || '—' },
     { header: 'Unit',        render: r => r.unit_of_measure || '—' },
-    { header: 'Default Cost',  render: r => fmt(r.unit_cost) },
-    { header: 'Default Price', render: r => fmt(r.unit_price) },
+    { header: 'Value',       render: r => fmt(r.value) },
     {
       header: 'Actions',
       render: r => (
@@ -138,18 +132,17 @@ export default function Items() {
               <Label>Description</Label>
               <Input className="mt-1" value={form.description} onChange={f('description')} />
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Unit of Measure</Label>
                 <Input className="mt-1" value={form.unit_of_measure} onChange={f('unit_of_measure')} placeholder="kg, pcs…" />
               </div>
               <div>
-                <Label>Unit Cost</Label>
-                <Input className="mt-1" type="number" step="0.01" min="0" value={form.unit_cost} onChange={f('unit_cost')} />
-              </div>
-              <div>
-                <Label>Unit Price</Label>
-                <Input className="mt-1" type="number" step="0.01" min="0" value={form.unit_price} onChange={f('unit_price')} />
+                <Label>Value</Label>
+                <Input className="mt-1" type="number" step="0.01" min="0" value={form.value} onChange={f('value')} placeholder="$ per unit" />
+                <p className="mt-1 text-xs text-gray-500">
+                  Worth of one unit. Auto-updated to the weighted-average PO cost on each receipt.
+                </p>
               </div>
             </div>
             {error && <p className="text-sm text-red-600">{error}</p>}
@@ -224,14 +217,10 @@ function ItemPricingDialog({ item, onClose }) {
           <DialogTitle>Pricing — {item.sku} · {item.name}</DialogTitle>
         </DialogHeader>
 
-        <div className="grid grid-cols-2 gap-3 text-sm">
+        <div className="grid grid-cols-1 text-sm">
           <div className="bg-gray-50 rounded p-3">
-            <p className="text-xs text-gray-500 uppercase tracking-wider">Catalogue default cost</p>
-            <p className="text-lg font-semibold">{fmt(item.unit_cost)}</p>
-          </div>
-          <div className="bg-gray-50 rounded p-3">
-            <p className="text-xs text-gray-500 uppercase tracking-wider">Catalogue default price</p>
-            <p className="text-lg font-semibold">{fmt(item.unit_price)}</p>
+            <p className="text-xs text-gray-500 uppercase tracking-wider">Catalogue value (avg PO cost)</p>
+            <p className="text-lg font-semibold">{fmt(item.value)}</p>
           </div>
         </div>
 

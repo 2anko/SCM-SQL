@@ -8,6 +8,7 @@ import { Label } from '../components/ui/label'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '../components/ui/dialog'
+import { date as fmtDate } from '../lib/format'
 
 const ROLES = ['head_manager', 'section_manager', 'employee', 'it_service']
 const ROLE_LABELS = {
@@ -16,8 +17,6 @@ const ROLE_LABELS = {
   employee:        'Employee (read & add)',
   it_service:      'IT Service (manage users)',
 }
-
-function fmtDate(s) { return s ? new Date(s).toLocaleDateString() : '—' }
 
 export default function Users() {
   const { user: currentUser } = useAuth()

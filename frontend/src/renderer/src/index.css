@@ -45,3 +45,113 @@ html, body, #root {
   margin: 0;
   padding: 0;
 }
+
+/* ── PDF export rules ───────────────────────────────────────────────────────
+   Strategy: the on-screen summary dialog stays exactly as it is. For PDF, the
+   summary components mount a *separate* element (PrintableReport, via a React
+   portal directly into document.body) that is `display: none` on screen and
+   becomes the ONLY visible thing during printToPDF. That element is laid out
+   as a normal flowing document — no fixed/centred positioning to fight — so
+   long tables paginate naturally and nothing gets clipped. */
+
+.print-only { display: none; }
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 14mm;
+  }
+
+  /* Hide every direct child of body. That covers the app root and every
+     Radix portal (dialogs, popovers, toasts). */
+  body > * { display: none !important; }
+
+  /* Reveal the print-only block. Its descendants were never hidden, so they
+     render in normal flow once the parent is visible. */
+  body > .print-only {
+    display: block !important;
+    background: white;
+    color: black;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 10pt;
+    line-height: 1.4;
+    margin: 0;
+    padding: 0;
+  }
+
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* ── Type scale for the printable doc ─────────────────────────────────── */
+  .print-only h1 { font-size: 16pt; margin: 0 0 4pt; }
+  .print-only h2 { font-size: 12pt; margin: 12pt 0 4pt; }
+  .print-only .pr-meta {
+    color: #555;
+    font-size: 8.5pt;
+    margin: 0 0 4pt;
+  }
+
+  /* ── Stat boxes row ───────────────────────────────────────────────────── */
+  .print-only .pr-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8pt;
+    margin: 8pt 0 12pt;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .print-only .pr-stat {
+    border: 0.5pt solid #bbb;
+    border-radius: 3pt;
+    padding: 6pt 8pt;
+  }
+  .print-only .pr-stat-label {
+    font-size: 7.5pt;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.5pt;
+  }
+  .print-only .pr-stat-value {
+    font-size: 13pt;
+    font-weight: 600;
+    margin-top: 2pt;
+  }
+
+  /* ── Tables ───────────────────────────────────────────────────────────── */
+  .print-only table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 8.5pt;
+    margin: 4pt 0 8pt;
+  }
+  .print-only thead { display: table-header-group; }
+  .print-only thead th {
+    text-align: left;
+    background: #f1f1f3;
+    border-bottom: 0.5pt solid #aaa;
+    padding: 4pt 5pt;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 7.5pt;
+    letter-spacing: 0.4pt;
+  }
+  .print-only tbody td {
+    padding: 3pt 5pt;
+    border-bottom: 0.25pt solid #e4e4e7;
+    vertical-align: top;
+  }
+  .print-only .pr-num { text-align: right; font-variant-numeric: tabular-nums; }
+  .print-only .pr-empty {
+    color: #888;
+    font-style: italic;
+    padding: 12pt;
+    text-align: center;
+  }
+  .print-only tr   { page-break-inside: avoid; break-inside: avoid; }
+  .print-only h2   { page-break-after: avoid;  break-after: avoid; }
+}

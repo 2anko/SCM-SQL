@@ -1,4 +1,5 @@
 // queries/purchaseOrders.js
+import { recomputeItemValue } from './items.js';
 
 export async function getAllPurchaseOrders(db, { status } = {}) {
   const values = [];
@@ -243,6 +244,14 @@ export async function receivePurchaseOrder(db, { id, created_by }) {
       [id]
     );
 
+    // Recompute items.value (weighted-average cost across all RECEIVED PO lines)
+    // for each distinct item we just received. Must run AFTER the status flip so
+    // this PO's lines are included in the average.
+    const distinctItemIds = [...new Set(lines.map(ln => ln.item_id))];
+    for (const itemId of distinctItemIds) {
+      await recomputeItemValue(client, itemId);
+    }
+
     await client.query('COMMIT');
     return getPurchaseOrderById(client, id);
   } catch (err) {
@@ -340,61 +349,3 @@ export async function updatePurchaseOrderStatus(db, id, status) {
   return rows[0] ?? null;
 }
 
-/**
- * Receive goods against a PO line.
- * Updates quantity_received, auto-advances PO status, and triggers an inventory RECEIPT.
- */
-export async function receivePurchaseOrderLine(db, { po_id, line_id, quantity_received, warehouse_id, created_by = null }) {
-  const client = await db.connect();
-  try {
-    await client.query('BEGIN');
-
-    // Update the line
-    const { rows: [line] } = await client.query(`
-      UPDATE purchase_order_lines
-      SET quantity_received = quantity_received + $1
-      WHERE id = $2 AND po_id = $3
-      RETURNING *
-    `, [quantity_received, line_id, po_id]);
-
-    if (!line) throw new Error(`PO line ${line_id} not found on PO ${po_id}`);
-
-    // Record inventory receipt
-    await client.query(`
-      INSERT INTO inventory_transactions
-        (txn_type, item_id, warehouse_id, quantity, purchase_order_id, created_by)
-      VALUES ('RECEIPT', $1, $2, $3, $4, $5)
-    `, [line.item_id, warehouse_id, quantity_received, po_id, created_by]);
-
-    await client.query(`
-      INSERT INTO inventory (warehouse_id, item_id, quantity)
-      VALUES ($1, $2, $3)
-      ON CONFLICT (warehouse_id, item_id)
-      DO UPDATE SET quantity = inventory.quantity + EXCLUDED.quantity, updated_at = now()
-    `, [warehouse_id, line.item_id, quantity_received]);
-
-    // Auto-update PO status based on all lines
-    const { rows: allLines } = await client.query(
-      `SELECT quantity_ordered, quantity_received FROM purchase_order_lines WHERE po_id = $1`,
-      [po_id]
-    );
-
-    const allReceived     = allLines.every(l => l.quantity_received >= l.quantity_ordered);
-    const anyReceived     = allLines.some(l => l.quantity_received > 0);
-    const newStatus       = allReceived ? 'RECEIVED' : anyReceived ? 'PARTIALLY_RECEIVED' : 'CONFIRMED';
-
-    await client.query(
-      `UPDATE purchase_orders SET status = $1, updated_at = now() WHERE id = $2`,
-      [newStatus, po_id]
-    );
-
-    await client.query('COMMIT');
-    return { line, new_po_status: newStatus };
-
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-  }
-}

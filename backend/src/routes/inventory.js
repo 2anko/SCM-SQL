@@ -1,5 +1,5 @@
 // routes/inventory.js
-import { getStockLevels, recordTransaction, transferStock, getTransactionHistory } from '../queries/inventory.js';
+import { getStockLevels, recordTransaction, transferStock, getTransactionHistory, getInventorySummary } from '../queries/inventory.js';
 import { authorize } from '../middleware/authorize.js';
 
 const TXN_TYPES = ['RECEIPT', 'SHIPMENT', 'TRANSFER_IN', 'TRANSFER_OUT', 'ADJUSTMENT', 'RETURN_IN', 'RETURN_OUT'];
@@ -44,6 +44,9 @@ export default async function inventoryRoutes(app) {
       return getStockLevels(req.db, { warehouseId, itemId });
     }
   );
+  app.get('/summary', { preHandler: authorize('read') },
+    async (req) => getInventorySummary(req.db)
+  );
   app.get('/history', { preHandler: authorize('read') },
     async (req) => {
       const { itemId, warehouseId, limit } = req.query;
@@ -52,8 +55,12 @@ export default async function inventoryRoutes(app) {
   );
   app.post('/transaction', { preHandler: authorize('create'), schema: transactionSchema },
     async (req, rep) => {
-      const txn = await recordTransaction(req.db, { ...req.body, created_by: req.user.userId });
-      return rep.code(201).send(txn);
+      try {
+        const txn = await recordTransaction(req.db, { ...req.body, created_by: req.user.userId });
+        return rep.code(201).send(txn);
+      } catch (err) {
+        return rep.code(400).send({ error: err.message });
+      }
     }
   );
   app.post('/transfer', { preHandler: authorize('create'), schema: transferSchema },

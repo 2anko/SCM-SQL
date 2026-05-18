@@ -1,14 +1,16 @@
 import { useState, useEffect } from 'react'
 import { api } from '../api/client'
 import { useAuth } from '../context/AuthContext'
+import { money, date as fmtDate } from '../lib/format'
+import { getDueUrgency, PO_IN_FLIGHT, SO_IN_FLIGHT } from '../lib/orderStatus'
+import UrgencyBanner from '../components/UrgencyBanner'
 
 const PO_OPEN_STATUSES = ['DRAFT', 'SENT', 'CONFIRMED', 'PARTIALLY_RECEIVED']
 const SO_OPEN_STATUSES = ['DRAFT', 'CONFIRMED', 'PARTIALLY_SHIPPED', 'SHIPPED']
 
-function fmtMoney(v) {
-  return v != null && v !== '' ? `$${Number(v).toFixed(2)}` : '$0.00'
-}
-function fmtDate(s) { return s ? new Date(s).toLocaleDateString() : '—' }
+// Dashboard prefers `$0.00` over `—` for blank money so stat cards never look
+// "missing". Coalesce to 0 before formatting.
+const fmtMoney = v => money(v ?? 0)
 
 function StatCard({ label, value, color, sub }) {
   return (
@@ -25,6 +27,8 @@ export default function Dashboard() {
   const [stats, setStats]       = useState(null)
   const [recentPos, setRecentPos] = useState([])
   const [recentSos, setRecentSos] = useState([])
+  const [urgentPos, setUrgentPos] = useState([])
+  const [urgentSos, setUrgentSos] = useState([])
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState('')
 
@@ -59,6 +63,12 @@ export default function Dashboard() {
 
       setRecentPos(pos.slice(0, 5))
       setRecentSos(sos.slice(0, 5))
+
+      // Urgency snapshots for the "Needs attention" panel. We only warn on
+      // in-flight orders — POs already sent to a supplier, SOs already
+      // confirmed to a customer. DRAFTs are deliberately excluded.
+      setUrgentPos(pos.map(p => ({ po: p, ...getDueUrgency(p, PO_IN_FLIGHT) })).filter(u => u.level))
+      setUrgentSos(sos.map(s => ({ so: s, ...getDueUrgency(s, SO_IN_FLIGHT) })).filter(u => u.level))
     } catch (err) {
       setError(err.message)
     } finally {
@@ -87,6 +97,24 @@ export default function Dashboard() {
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
+
+      {/* Needs-attention banners — only shown when there's something urgent. */}
+      {urgentPos.length > 0 && (
+        <UrgencyBanner
+          urgent={urgentPos}
+          overdueCount={urgentPos.filter(u => u.level === 'overdue' || u.level === 'today').length}
+          soonCount={urgentPos.filter(u => u.level === 'soon').length}
+          kind="PO"
+        />
+      )}
+      {urgentSos.length > 0 && (
+        <UrgencyBanner
+          urgent={urgentSos}
+          overdueCount={urgentSos.filter(u => u.level === 'overdue' || u.level === 'today').length}
+          soonCount={urgentSos.filter(u => u.level === 'soon').length}
+          kind="SO"
+        />
+      )}
 
       {/* Top row: 4 primary cards */}
       <div className="grid grid-cols-4 gap-4">

@@ -9,6 +9,11 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '../components/ui/dialog'
 import SummaryPieChart from '../components/SummaryPieChart'
+import PrintableReport from '../components/PrintableReport'
+import { exportPDF, defaultPdfName } from '../api/pdf'
+import { money as fmt, date as fmtDate } from '../lib/format'
+import { getDueUrgency, urgencyPhrase, URGENCY_TEXT, PO_IN_FLIGHT } from '../lib/orderStatus'
+import UrgencyBanner from '../components/UrgencyBanner'
 
 const STATUSES = ['DRAFT', 'SENT', 'CONFIRMED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED']
 const STATUS_COLORS = {
@@ -25,24 +30,6 @@ function StatusPill({ status }) {
   return <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${cls}`}>{status.replace(/_/g, ' ')}</span>
 }
 
-function fmt(v) { return v != null && v !== '' ? `$${Number(v).toFixed(2)}` : '—' }
-function fmtDate(s) { return s ? new Date(s).toLocaleDateString() : '—' }
-
-/**
- * A PO is overdue when it's still DRAFT and its expected_date is at least
- * one full calendar day in the past. "Now" comes from the user's system clock
- * (new Date() in the renderer process — Electron has no separate time source).
- */
-function isOverdue(po) {
-  if (po.status !== 'DRAFT' || !po.expected_date) return false
-  const expected = new Date(po.expected_date)
-  if (isNaN(expected)) return false
-  expected.setHours(0, 0, 0, 0)
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  return (today - expected) / (1000 * 60 * 60 * 24) >= 1
-}
-
 function todayISO() {
   return new Date().toISOString().split('T')[0]
 }
@@ -52,7 +39,7 @@ function nDaysAgoISO(n) {
   return d.toISOString().split('T')[0]
 }
 
-const EMPTY_ITEM_NEW    = { sku: '', name: '', description: '', unit_of_measure: '', unit_cost: '', unit_price: '' }
+const EMPTY_ITEM_NEW    = { sku: '', name: '', description: '', unit_of_measure: '', value: '' }
 const EMPTY_FACTORY_NEW = { name: '', address: '', country: '', rep_name: '', rep_email: '', rep_phone: '' }
 const EMPTY_LINE        = { item_id: '', quantity_ordered: '', unit_cost: '', destination_warehouse_id: '', item_new: { ...EMPTY_ITEM_NEW } }
 
@@ -92,23 +79,39 @@ export default function PurchaseOrders() {
   useEffect(() => { loadDropdowns() }, [])
   useEffect(() => { load() }, [statusFilter])
 
-  const overdueCount = pos.filter(isOverdue).length
+  // Tag each PO with its urgency once; reused by the column renders + banner.
+  const urgent = pos
+    .map(p => ({ po: p, ...getDueUrgency(p, PO_IN_FLIGHT) }))
+    .filter(u => u.level)
+  const overdueCount = urgent.filter(u => u.level === 'overdue' || u.level === 'today').length
+  const soonCount    = urgent.filter(u => u.level === 'soon').length
 
   const columns = [
-    { header: 'PO #',     render: r => (
-      <span className="inline-flex items-center gap-1.5">
-        {isOverdue(r) && <span title="Overdue: not marked Sent past expected date" className="text-red-600">⚠</span>}
-        #{r.id}
-      </span>
-    )},
+    { header: 'PO #',     render: r => {
+      const { level } = getDueUrgency(r, PO_IN_FLIGHT)
+      return (
+        <span className="inline-flex items-center gap-1.5">
+          {level && (
+            <span title={urgencyPhrase(getDueUrgency(r, PO_IN_FLIGHT).days)} className={URGENCY_TEXT[level]}>⚠</span>
+          )}
+          #{r.id}
+        </span>
+      )
+    }},
     { header: 'Supplier', accessor: 'supplier' },
     { header: 'Factory',  render: r => r.factory || '—' },
     { header: 'Status',   render: r => <StatusPill status={r.status} /> },
     { header: 'Lines',    accessor: 'line_count' },
     { header: 'Total',    render: r => fmt(r.total_value) },
-    { header: 'Expected', render: r => (
-      <span className={isOverdue(r) ? 'text-red-600 font-medium' : ''}>{fmtDate(r.expected_date)}</span>
-    )},
+    { header: 'Expected', render: r => {
+      const { level, days } = getDueUrgency(r, PO_IN_FLIGHT)
+      return (
+        <span className={level ? `${URGENCY_TEXT[level]} font-medium` : ''}>
+          {fmtDate(r.expected_date)}
+          {level && <span className="ml-1 text-xs font-normal">({urgencyPhrase(days)})</span>}
+        </span>
+      )
+    }},
     { header: 'Created',  render: r => fmtDate(r.created_at) },
   ]
 
@@ -125,11 +128,8 @@ export default function PurchaseOrders() {
         </div>
       </div>
 
-      {overdueCount > 0 && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          <strong>⚠ {overdueCount} purchase order{overdueCount > 1 ? 's are' : ' is'} overdue</strong>
-          {' '}— still in DRAFT status more than a day past its expected date.
-        </div>
+      {urgent.length > 0 && (
+        <UrgencyBanner urgent={urgent} overdueCount={overdueCount} soonCount={soonCount} kind="PO" />
       )}
 
       <div className="flex items-center gap-3">
@@ -258,13 +258,13 @@ function POFormDialog({ mode, existing, suppliers, items, warehouses, onClose, o
   }, [form.supplier_id])
 
   // Resolve the suggested unit cost for an item from this supplier:
-  // supplier_items override → items catalogue default → blank
+  // supplier_items override → items catalogue value → blank
   function suggestedCost(itemId) {
     if (!itemId || itemId === 'NEW') return ''
     const si = supplierItems.find(r => String(r.item_id) === String(itemId))
     if (si) return String(si.unit_cost)
     const item = items.find(i => String(i.id) === String(itemId))
-    if (item?.unit_cost != null) return String(item.unit_cost)
+    if (item?.value != null) return String(item.value)
     return ''
   }
 
@@ -316,8 +316,7 @@ function POFormDialog({ mode, existing, suppliers, items, warehouses, onClose, o
             name: iNew.name.trim(),
             ...(iNew.description     && { description:     iNew.description.trim() }),
             ...(iNew.unit_of_measure && { unit_of_measure: iNew.unit_of_measure.trim() }),
-            ...(iNew.unit_cost  !== '' && { unit_cost:  Number(iNew.unit_cost) }),
-            ...(iNew.unit_price !== '' && { unit_price: Number(iNew.unit_price) }),
+            ...(iNew.value !== '' && { value: Number(iNew.value) }),
           }
           const created = await api.post('/items', itemBody)
           itemId = created.id
@@ -437,8 +436,8 @@ function POFormDialog({ mode, existing, suppliers, items, warehouses, onClose, o
                         const si = supplierItems.find(r => String(r.item_id) === String(ln.item_id))
                         if (si) return `Supplier-specific cost: $${Number(si.unit_cost).toFixed(2)}`
                         const item = items.find(i => String(i.id) === String(ln.item_id))
-                        if (item?.unit_cost != null) return `Catalogue default cost: $${Number(item.unit_cost).toFixed(2)} (no supplier-specific cost set)`
-                        return 'No reference cost set — enter unit cost manually.'
+                        if (item?.value != null) return `Catalogue value: $${Number(item.value).toFixed(2)} (no supplier-specific cost set)`
+                        return 'No reference value set — enter unit cost manually.'
                       })()}
                     </p>
                   )}
@@ -452,18 +451,14 @@ function POFormDialog({ mode, existing, suppliers, items, warehouses, onClose, o
                       <div><Label>Name *</Label><Input className="mt-1" value={ln.item_new.name} onChange={e => updateLineItemNew(idx, 'name', e.target.value)} required /></div>
                     </div>
                     <div><Label>Description</Label><Input className="mt-1" value={ln.item_new.description} onChange={e => updateLineItemNew(idx, 'description', e.target.value)} /></div>
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-2 gap-3">
                       <div>
                         <Label>Unit of Measure</Label>
                         <Input className="mt-1" value={ln.item_new.unit_of_measure} onChange={e => updateLineItemNew(idx, 'unit_of_measure', e.target.value)} placeholder="kg, pcs…" />
                       </div>
                       <div>
-                        <Label>Default Cost</Label>
-                        <Input className="mt-1" type="number" step="0.01" min="0" value={ln.item_new.unit_cost}  onChange={e => updateLineItemNew(idx, 'unit_cost',  e.target.value)} />
-                      </div>
-                      <div>
-                        <Label>Default Price</Label>
-                        <Input className="mt-1" type="number" step="0.01" min="0" value={ln.item_new.unit_price} onChange={e => updateLineItemNew(idx, 'unit_price', e.target.value)} />
+                        <Label>Value</Label>
+                        <Input className="mt-1" type="number" step="0.01" min="0" value={ln.item_new.value} onChange={e => updateLineItemNew(idx, 'value', e.target.value)} placeholder="$ per unit" />
                       </div>
                     </div>
                   </div>
@@ -958,8 +953,57 @@ function SummaryReportDialog({ suppliers, items, warehouses, canWrite, onChange,
         )}
 
         <DialogFooter>
+          {data && (
+            <Button
+              variant="outline"
+              onClick={() => exportPDF({ defaultFilename: defaultPdfName('po-summary', { from, to }) })
+                .catch(err => alert(err.message))}
+            >
+              Export PDF
+            </Button>
+          )}
           <Button variant="outline" onClick={onClose}>Close</Button>
         </DialogFooter>
+
+        {/* Off-screen print-only render. Hidden on screen via .print-only;
+            revealed during printToPDF (see index.css). */}
+        {data && (
+          <PrintableReport
+            title="Purchase Order Summary"
+            subtitle={`From ${from} to ${to}`}
+            stats={[
+              { label: 'Purchase orders (excl. cancelled)', value: data.totals.po_count },
+              { label: 'Total spend', value: fmt(data.totals.total_cost) },
+            ]}
+            sections={[
+              {
+                title: `Items purchased (${data.by_item.length})`,
+                columns: [
+                  { header: 'SKU',          accessor: 'sku' },
+                  { header: 'Item',         accessor: 'item' },
+                  { header: 'Quantity',     accessor: r => Number(r.total_quantity).toLocaleString(), align: 'right' },
+                  { header: 'Total cost',   accessor: r => fmt(r.total_cost), align: 'right' },
+                ],
+                rows: data.by_item,
+                empty: 'No items purchased in this range.',
+              },
+              {
+                title: `Purchase orders in range (${data.pos.length})`,
+                columns: [
+                  { header: 'PO #',     accessor: r => `#${r.id}` },
+                  { header: 'Supplier', accessor: 'supplier' },
+                  { header: 'Factory',  accessor: r => r.factory || '—' },
+                  { header: 'Status',   accessor: r => r.status.replace(/_/g, ' ') },
+                  { header: 'Lines',    accessor: 'line_count', align: 'right' },
+                  { header: 'Total',    accessor: r => fmt(r.total_value), align: 'right' },
+                  { header: 'Created',  accessor: r => fmtDate(r.created_at) },
+                ],
+                rows: data.pos,
+                empty: 'No POs in this range.',
+              },
+            ]}
+          />
+        )}
 
         {drillId && (
           <PODetailDialog
