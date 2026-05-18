@@ -1,87 +1,71 @@
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Skeleton } from "@/components/ui/skeleton";
-import { cn } from "@/lib/utils";
+// Generic data table used by every list page.
+//
+// columns: [{ header, accessor?: string, render?: (row) => ReactNode }, …]
+// data:    array of row objects (or undefined/empty for empty state)
 
-export default function DataTable({ columns, data, isLoading, onRowClick, emptyMessage = "No data available" }) {
+const wrapCls = 'rounded-xl border border-slate-200 overflow-hidden'
+const headCls = 'text-left px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider'
+const cellCls = 'px-4 py-3 text-sm text-slate-700'
+
+function Header({ columns }) {
+  return (
+    <thead className="bg-slate-50">
+      <tr>{columns.map((c, i) => <th key={i} className={headCls}>{c.header}</th>)}</tr>
+    </thead>
+  )
+}
+
+export default function DataTable({ columns, data, isLoading, onRowClick, emptyMessage = 'No data available' }) {
   if (isLoading) {
     return (
-      <div className="rounded-xl border border-slate-200 overflow-hidden">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-slate-50">
-              {columns.map((col, idx) => (
-                <TableHead key={idx} className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                  {col.header}
-                </TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {Array(5).fill(0).map((_, rowIdx) => (
-              <TableRow key={rowIdx}>
-                {columns.map((_, colIdx) => (
-                  <TableCell key={colIdx}>
-                    <Skeleton className="h-4 w-24" />
-                  </TableCell>
+      <div className={wrapCls}>
+        <table className="w-full">
+          <Header columns={columns} />
+          <tbody>
+            {Array.from({ length: 5 }).map((_, r) => (
+              <tr key={r} className="border-t border-slate-100">
+                {columns.map((_, c) => (
+                  <td key={c} className={cellCls}>
+                    <div className="h-4 w-24 rounded bg-slate-200 animate-pulse" />
+                  </td>
                 ))}
-              </TableRow>
+              </tr>
             ))}
-          </TableBody>
-        </Table>
+          </tbody>
+        </table>
       </div>
-    );
+    )
   }
 
   if (!data?.length) {
     return (
-      <div className="rounded-xl border border-slate-200 overflow-hidden">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-slate-50">
-              {columns.map((col, idx) => (
-                <TableHead key={idx} className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                  {col.header}
-                </TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-        </Table>
+      <div className={wrapCls}>
+        <table className="w-full"><Header columns={columns} /></table>
         <div className="py-12 text-center text-slate-500">{emptyMessage}</div>
       </div>
-    );
+    )
   }
 
+  const rowCls = onRowClick
+    ? 'border-t border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer'
+    : 'border-t border-slate-100 hover:bg-slate-50 transition-colors'
+
   return (
-    <div className="rounded-xl border border-slate-200 overflow-hidden">
-      <Table>
-        <TableHeader>
-          <TableRow className="bg-slate-50">
-            {columns.map((col, idx) => (
-              <TableHead key={idx} className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                {col.header}
-              </TableHead>
-            ))}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {data.map((row, rowIdx) => (
-            <TableRow 
-              key={row.id || rowIdx} 
-              className={cn(
-                "hover:bg-slate-50 transition-colors",
-                onRowClick && "cursor-pointer"
-              )}
-              onClick={() => onRowClick?.(row)}
-            >
-              {columns.map((col, colIdx) => (
-                <TableCell key={colIdx} className="text-sm text-slate-700">
-                  {col.render ? col.render(row) : row[col.accessor]}
-                </TableCell>
+    <div className={wrapCls}>
+      <table className="w-full">
+        <Header columns={columns} />
+        <tbody>
+          {data.map((row, ri) => (
+            <tr key={row.id ?? ri} className={rowCls} onClick={() => onRowClick?.(row)}>
+              {columns.map((c, ci) => (
+                <td key={ci} className={cellCls}>
+                  {c.render ? c.render(row) : row[c.accessor]}
+                </td>
               ))}
-            </TableRow>
+            </tr>
           ))}
-        </TableBody>
-      </Table>
+        </tbody>
+      </table>
     </div>
-  );
+  )
 }

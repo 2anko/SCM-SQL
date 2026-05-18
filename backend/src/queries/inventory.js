@@ -15,6 +15,8 @@ export async function getStockLevels(db, { warehouseId, itemId } = {}) {
   const { rows } = await db.query(`
     SELECT
       inv.id,
+      inv.warehouse_id,
+      inv.item_id,
       w.name   AS warehouse,
       i.sku,
       i.name   AS item,
@@ -52,14 +54,31 @@ export async function recordTransaction(db, {
   created_by = null,
 }) {
   const OUTBOUND = new Set(['SHIPMENT', 'TRANSFER_OUT', 'RETURN_OUT']);
-  const delta = OUTBOUND.has(txn_type) ? -Math.abs(quantity) : Math.abs(quantity);
+  const isOutbound = OUTBOUND.has(txn_type);
+  const delta = isOutbound ? -Math.abs(quantity) : Math.abs(quantity);
 
   // Run inside a transaction so the log + balance update are atomic
   const client = await db.connect();
   try {
     await client.query('BEGIN');
 
-    // 1. Write the transaction log
+    // 1. For outbound moves, lock the inventory row and verify there's enough stock.
+    //    Without this, manual RETURN_OUT / TRANSFER_OUT could push the balance
+    //    negative (the upsert below blindly adds the delta).
+    if (isOutbound) {
+      const { rows: [row] } = await client.query(
+        `SELECT quantity FROM inventory
+          WHERE warehouse_id = $1 AND item_id = $2
+          FOR UPDATE`,
+        [warehouse_id, item_id]
+      );
+      const available = Number(row?.quantity ?? 0);
+      if (available < Math.abs(quantity)) {
+        throw new Error(`Insufficient stock. Available: ${available}, Requested: ${Math.abs(quantity)}`);
+      }
+    }
+
+    // 2. Write the transaction log
     const { rows } = await client.query(`
       INSERT INTO inventory_transactions
         (txn_type, item_id, warehouse_id, related_warehouse_id,
@@ -69,7 +88,7 @@ export async function recordTransaction(db, {
     `, [txn_type, item_id, warehouse_id, related_warehouse_id,
         Math.abs(quantity), purchase_order_id, sales_order_id, notes, created_by]);
 
-    // 2. Upsert the inventory balance
+    // 3. Upsert the inventory balance
     await client.query(`
       INSERT INTO inventory (warehouse_id, item_id, quantity)
       VALUES ($1, $2, $3)
@@ -144,6 +163,75 @@ export async function transferStock(db, { item_id, from_warehouse_id, to_warehou
   } finally {
     client.release();
   }
+}
+
+/**
+ * Aggregate the entire current inventory by item, by warehouse, and overall.
+ * "value" of an inventory row = quantity * items.value. items.value is updated
+ * automatically to the weighted-average cost across all RECEIVED PO lines.
+ */
+export async function getInventorySummary(db) {
+  const { rows: byItem } = await db.query(`
+    SELECT
+      i.id                              AS item_id,
+      i.sku,
+      i.name                            AS item,
+      i.unit_of_measure,
+      SUM(inv.quantity)                 AS total_quantity,
+      i.value                           AS unit_value,
+      SUM(inv.quantity * i.value)       AS total_value
+    FROM inventory inv
+    JOIN items i ON i.id = inv.item_id
+    WHERE inv.quantity > 0
+    GROUP BY i.id, i.sku, i.name, i.unit_of_measure, i.value
+    ORDER BY total_value DESC NULLS LAST
+  `);
+
+  const { rows: byWarehouse } = await db.query(`
+    SELECT
+      w.id                              AS warehouse_id,
+      w.name                            AS warehouse,
+      COUNT(DISTINCT inv.item_id)       AS item_count,
+      SUM(inv.quantity)                 AS total_quantity,
+      SUM(inv.quantity * i.value)       AS total_value
+    FROM inventory inv
+    JOIN items      i ON i.id = inv.item_id
+    JOIN warehouses w ON w.id = inv.warehouse_id
+    WHERE inv.quantity > 0
+    GROUP BY w.id, w.name
+    ORDER BY total_value DESC NULLS LAST
+  `);
+
+  const { rows: stock } = await db.query(`
+    SELECT
+      inv.warehouse_id,
+      inv.item_id,
+      w.name                       AS warehouse,
+      i.sku,
+      i.name                       AS item,
+      i.unit_of_measure,
+      inv.quantity,
+      i.value                      AS unit_value,
+      inv.quantity * i.value       AS line_value
+    FROM inventory inv
+    JOIN warehouses w ON w.id = inv.warehouse_id
+    JOIN items      i ON i.id = inv.item_id
+    WHERE inv.quantity > 0
+    ORDER BY w.name, i.name
+  `);
+
+  const totalValue = byItem.reduce((sum, r) => sum + Number(r.total_value || 0), 0);
+
+  return {
+    totals: {
+      total_value:     totalValue,
+      item_count:      byItem.length,
+      warehouse_count: byWarehouse.length,
+    },
+    by_item:      byItem,
+    by_warehouse: byWarehouse,
+    stock,
+  };
 }
 
 /**

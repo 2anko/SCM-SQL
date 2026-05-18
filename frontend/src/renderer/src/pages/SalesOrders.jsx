@@ -9,6 +9,11 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '../components/ui/dialog'
 import SummaryPieChart from '../components/SummaryPieChart'
+import PrintableReport from '../components/PrintableReport'
+import { exportPDF, defaultPdfName } from '../api/pdf'
+import { money as fmt, date as fmtDate } from '../lib/format'
+import { getDueUrgency, urgencyPhrase, URGENCY_TEXT, SO_IN_FLIGHT } from '../lib/orderStatus'
+import UrgencyBanner from '../components/UrgencyBanner'
 
 const STATUSES = ['DRAFT', 'CONFIRMED', 'PARTIALLY_SHIPPED', 'SHIPPED', 'DELIVERED', 'CANCELLED']
 const STATUS_COLORS = {
@@ -23,23 +28,6 @@ const STATUS_COLORS = {
 function StatusPill({ status }) {
   const cls = STATUS_COLORS[status] || 'bg-slate-100 text-slate-700'
   return <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${cls}`}>{status.replace(/_/g, ' ')}</span>
-}
-
-function fmt(v) { return v != null && v !== '' ? `$${Number(v).toFixed(2)}` : '—' }
-function fmtDate(s) { return s ? new Date(s).toLocaleDateString() : '—' }
-
-/**
- * An SO is overdue when it's still DRAFT and its expected_date is at least
- * one full calendar day in the past. Mirrors the PO overdue logic.
- */
-function isOverdue(so) {
-  if (so.status !== 'DRAFT' || !so.expected_date) return false
-  const expected = new Date(so.expected_date)
-  if (isNaN(expected)) return false
-  expected.setHours(0, 0, 0, 0)
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  return (today - expected) / (1000 * 60 * 60 * 24) >= 1
 }
 
 function todayISO() {
@@ -85,22 +73,35 @@ export default function SalesOrders() {
   useEffect(() => { loadDropdowns() }, [])
   useEffect(() => { load() }, [statusFilter])
 
-  const overdueCount = sos.filter(isOverdue).length
+  const urgent = sos
+    .map(s => ({ so: s, ...getDueUrgency(s, SO_IN_FLIGHT) }))
+    .filter(u => u.level)
+  const overdueCount = urgent.filter(u => u.level === 'overdue' || u.level === 'today').length
+  const soonCount    = urgent.filter(u => u.level === 'soon').length
 
   const columns = [
-    { header: 'SO #',     render: r => (
-      <span className="inline-flex items-center gap-1.5">
-        {isOverdue(r) && <span title="Overdue: still in DRAFT past expected date" className="text-red-600">⚠</span>}
-        #{r.id}
-      </span>
-    )},
+    { header: 'SO #',     render: r => {
+      const { level, days } = getDueUrgency(r, SO_IN_FLIGHT)
+      return (
+        <span className="inline-flex items-center gap-1.5">
+          {level && <span title={urgencyPhrase(days)} className={URGENCY_TEXT[level]}>⚠</span>}
+          #{r.id}
+        </span>
+      )
+    }},
     { header: 'Customer', accessor: 'customer' },
     { header: 'Status',   render: r => <StatusPill status={r.status} /> },
     { header: 'Lines',    accessor: 'line_count' },
     { header: 'Total',    render: r => fmt(r.total_value) },
-    { header: 'Expected', render: r => (
-      <span className={isOverdue(r) ? 'text-red-600 font-medium' : ''}>{fmtDate(r.expected_date)}</span>
-    )},
+    { header: 'Expected', render: r => {
+      const { level, days } = getDueUrgency(r, SO_IN_FLIGHT)
+      return (
+        <span className={level ? `${URGENCY_TEXT[level]} font-medium` : ''}>
+          {fmtDate(r.expected_date)}
+          {level && <span className="ml-1 text-xs font-normal">({urgencyPhrase(days)})</span>}
+        </span>
+      )
+    }},
     { header: 'Created',  render: r => fmtDate(r.created_at) },
   ]
 
@@ -117,11 +118,8 @@ export default function SalesOrders() {
         </div>
       </div>
 
-      {overdueCount > 0 && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          <strong>⚠ {overdueCount} sales order{overdueCount > 1 ? 's are' : ' is'} overdue</strong>
-          {' '}— still in DRAFT status more than a day past its expected date.
-        </div>
+      {urgent.length > 0 && (
+        <UrgencyBanner urgent={urgent} overdueCount={overdueCount} soonCount={soonCount} kind="SO" />
       )}
 
       <div className="flex items-center gap-3">
@@ -204,6 +202,29 @@ function SOFormDialog({ mode, existing, customers, items, warehouses, onClose, o
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState('')
   const [customerItems, setCustomerItems] = useState([])
+  // Snapshot of current stock at dialog open — keyed by `${warehouse_id}-${item_id}`.
+  // Used to warn (not block) when a line orders more than what's on hand.
+  // SOs in DRAFT are allowed to overbook; the actual stock check happens at
+  // ship time. This is just a heads-up while building the order.
+  const [stockMap, setStockMap] = useState(() => new Map())
+
+  useEffect(() => {
+    let cancelled = false
+    api.get('/inventory')
+      .then(rows => {
+        if (cancelled) return
+        const m = new Map()
+        for (const r of rows) m.set(`${r.warehouse_id}-${r.item_id}`, Number(r.quantity ?? 0))
+        setStockMap(m)
+      })
+      .catch(() => { if (!cancelled) setStockMap(new Map()) })
+    return () => { cancelled = true }
+  }, [])
+
+  function availableFor(line) {
+    if (!line.item_id || !line.source_warehouse_id) return null
+    return stockMap.get(`${line.source_warehouse_id}-${line.item_id}`) ?? 0
+  }
 
   function f(k) { return e => setForm(p => ({ ...p, [k]: e.target.value })) }
 
@@ -226,7 +247,7 @@ function SOFormDialog({ mode, existing, customers, items, warehouses, onClose, o
     const ci = customerItems.find(r => String(r.item_id) === String(itemId))
     if (ci) return String(ci.unit_price)
     const item = items.find(i => String(i.id) === String(itemId))
-    if (item?.unit_price != null) return String(item.unit_price)
+    if (item?.value != null) return String(item.value)
     return ''
   }
 
@@ -322,8 +343,8 @@ function SOFormDialog({ mode, existing, customers, items, warehouses, onClose, o
                         const ci = customerItems.find(r => String(r.item_id) === String(ln.item_id))
                         if (ci) return `Customer-specific price: $${Number(ci.unit_price).toFixed(2)}`
                         const item = items.find(i => String(i.id) === String(ln.item_id))
-                        if (item?.unit_price != null) return `Catalogue default price: $${Number(item.unit_price).toFixed(2)} (no customer-specific price set)`
-                        return 'No reference price set — enter unit price manually.'
+                        if (item?.value != null) return `Catalogue value: $${Number(item.value).toFixed(2)} (no customer-specific price set)`
+                        return 'No reference value set — enter unit price manually.'
                       })()}
                     </p>
                   )}
@@ -345,9 +366,40 @@ function SOFormDialog({ mode, existing, customers, items, warehouses, onClose, o
                     </select>
                   </div>
                 </div>
+                {(() => {
+                  const avail = availableFor(ln)
+                  if (avail == null) return null
+                  const qty   = Number(ln.quantity_ordered)
+                  const over  = qty > 0 && qty > avail
+                  const wname = warehouses.find(w => String(w.id) === String(ln.source_warehouse_id))?.name || 'source'
+                  const item  = items.find(i => String(i.id) === String(ln.item_id))
+                  const unit  = item?.unit_of_measure || ''
+                  return (
+                    <p className={`text-xs ${over ? 'text-red-600 font-medium' : 'text-gray-500'}`}>
+                      {over ? '⚠ ' : ''}
+                      Available at {wname}: {avail} {unit}
+                      {over && ` — ordering ${qty - avail} ${unit} more than on hand`}
+                    </p>
+                  )
+                })()}
               </div>
             ))}
           </div>
+
+          {(() => {
+            const overLines = form.lines.filter(ln => {
+              const a = availableFor(ln)
+              const q = Number(ln.quantity_ordered)
+              return a != null && q > 0 && q > a
+            })
+            if (overLines.length === 0) return null
+            return (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                <strong>⚠ {overLines.length} line{overLines.length > 1 ? 's' : ''} exceed available stock.</strong>{' '}
+                You can still create this SO as a DRAFT, but it won't be shippable until inventory is replenished or the lines are reduced.
+              </div>
+            )
+          })()}
 
           {error && <p className="text-sm text-red-600">{error}</p>}
           <DialogFooter>
@@ -701,8 +753,54 @@ function SummaryReportDialog({ customers, items, warehouses, canWrite, onChange,
         )}
 
         <DialogFooter>
+          {data && (
+            <Button
+              variant="outline"
+              onClick={() => exportPDF({ defaultFilename: defaultPdfName('so-summary', { from, to }) })
+                .catch(err => alert(err.message))}
+            >
+              Export PDF
+            </Button>
+          )}
           <Button variant="outline" onClick={onClose}>Close</Button>
         </DialogFooter>
+
+        {data && (
+          <PrintableReport
+            title="Sales Order Summary"
+            subtitle={`From ${from} to ${to}`}
+            stats={[
+              { label: 'Sales orders shipped', value: data.totals.so_count },
+              { label: 'Total revenue',        value: fmt(data.totals.total_value) },
+            ]}
+            sections={[
+              {
+                title: `Items sold (${data.by_item.length})`,
+                columns: [
+                  { header: 'SKU',           accessor: 'sku' },
+                  { header: 'Item',          accessor: 'item' },
+                  { header: 'Quantity',      accessor: r => Number(r.total_quantity).toLocaleString(), align: 'right' },
+                  { header: 'Total revenue', accessor: r => fmt(r.total_value), align: 'right' },
+                ],
+                rows: data.by_item,
+                empty: 'No items sold in this range.',
+              },
+              {
+                title: `Sales orders in range (${data.sos.length})`,
+                columns: [
+                  { header: 'SO #',     accessor: r => `#${r.id}` },
+                  { header: 'Customer', accessor: 'customer' },
+                  { header: 'Status',   accessor: r => r.status.replace(/_/g, ' ') },
+                  { header: 'Lines',    accessor: 'line_count', align: 'right' },
+                  { header: 'Total',    accessor: r => fmt(r.total_value), align: 'right' },
+                  { header: 'Created',  accessor: r => fmtDate(r.created_at) },
+                ],
+                rows: data.sos,
+                empty: 'No SOs in this range.',
+              },
+            ]}
+          />
+        )}
 
         {drillId && (
           <SODetailDialog

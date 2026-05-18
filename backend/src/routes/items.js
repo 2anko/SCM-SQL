@@ -14,8 +14,7 @@ const createSchema = {
       name:            { type: 'string', minLength: 1 },
       description:     { type: 'string' },
       unit_of_measure: { type: 'string' },
-      unit_cost:       { type: 'number', minimum: 0 },
-      unit_price:      { type: 'number', minimum: 0 },
+      value:           { type: 'number', minimum: 0 },
     },
   },
 };
@@ -28,8 +27,7 @@ const updateSchema = {
       name:            { type: 'string', minLength: 1 },
       description:     { type: 'string' },
       unit_of_measure: { type: 'string' },
-      unit_cost:       { type: 'number', minimum: 0 },
-      unit_price:      { type: 'number', minimum: 0 },
+      value:           { type: 'number', minimum: 0 },
     },
   },
 };
