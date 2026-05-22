@@ -1,19 +1,22 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
-// The renderer calls the Fastify backend directly via fetch — no IPC needed for API calls.
-// IPC is reserved for OS-level capabilities the renderer can't do on its own.
+// The renderer talks to the Fastify backend over fetch — these bridges are
+// only for things the renderer can't do on its own (filesystem, IPC, OS
+// dialogs, embedded backend lifecycle).
 contextBridge.exposeInMainWorld('electron', {
   versions: {
-    node: process.versions.node,
+    node:     process.versions.node,
     electron: process.versions.electron,
   },
-  /**
-   * Render the current page to PDF and prompt the user to save it.
-   * The main process snapshots whatever's in the renderer's DOM via
-   * webContents.printToPDF(), using the @media print rules from index.css.
-   *
-   * @param {{ defaultFilename?: string }} opts
-   * @returns {Promise<{ ok: boolean, path?: string, canceled?: boolean, error?: string }>}
-   */
+
+  // PDF export — see main/index.js export-pdf handler.
   exportPDF: (opts) => ipcRenderer.invoke('export-pdf', opts ?? {}),
+
+  // First-run setup wizard bridges.
+  setup: {
+    getState:       ()         => ipcRenderer.invoke('setup:get-state'),
+    testConnection: (dbConfig) => ipcRenderer.invoke('setup:test-connection', dbConfig),
+    saveAndStart:   (payload)  => ipcRenderer.invoke('setup:save-and-start', payload),
+    markComplete:   ()         => ipcRenderer.invoke('setup:mark-complete'),
+  },
 })
