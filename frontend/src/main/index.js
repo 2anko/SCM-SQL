@@ -1,18 +1,122 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
-const fs   = require('fs/promises')
-const path = require('path')
+const crypto = require('crypto')
+const fs    = require('fs/promises')
+const path  = require('path')
+const { pathToFileURL } = require('url')
 
-/**
- * Render the calling renderer's current DOM to PDF, then show a save dialog.
- *
- * The renderer toggles a `printing` class on <body> just before invoking this
- * (and removes it after), so the print stylesheet in index.css hides everything
- * outside .printable and removes elements marked .no-print. Result: the PDF
- * matches what the user sees, minus the chrome.
- *
- * Returns { ok: true, path } on success, { ok: false, canceled: true } if the
- * user dismissed the save dialog, or { ok: false, error } on failure.
- */
+// Helper so the dynamic backend imports build a correct file:// URL on both
+// Windows (file:///C:/...) and POSIX (file:///home/...). Doing this by hand
+// produced file://C:/... on Windows, which ES module resolution rejects.
+const importBackend = (relPath) =>
+  import(pathToFileURL(path.join(backendRoot, relPath)).href)
+
+// ── Config storage ──────────────────────────────────────────────────────────
+// %APPDATA%\SCM\config.json on Windows. Holds DB connection + JWT secret +
+// a flag we use to tell the renderer whether to show the setup wizard.
+
+const configPath = () => path.join(app.getPath('userData'), 'config.json')
+
+async function readConfig() {
+  try {
+    const raw = await fs.readFile(configPath(), 'utf8')
+    return JSON.parse(raw)
+  } catch (err) {
+    if (err.code === 'ENOENT') return null
+    throw err
+  }
+}
+async function writeConfig(config) {
+  await fs.mkdir(path.dirname(configPath()), { recursive: true })
+  await fs.writeFile(configPath(), JSON.stringify(config, null, 2), 'utf8')
+}
+
+// ── Backend bootstrap ───────────────────────────────────────────────────────
+// In dev (`electron-vite dev`), __dirname is .../frontend/out/main/, so the
+// backend lives three levels up. When packaged by electron-builder, the
+// backend and sql/migrations folders land under process.resourcesPath thanks
+// to the extraResources entries in package.json's "build" config.
+
+const isDev = !!process.env.ELECTRON_RENDERER_URL
+const backendRoot = isDev
+  ? path.resolve(__dirname, '../../../backend')
+  : path.join(process.resourcesPath, 'backend')
+
+const migrationsDir = isDev
+  ? path.resolve(__dirname, '../../../sql/migrations')
+  : path.join(process.resourcesPath, 'sql/migrations')
+
+let backendApp = null   // running Fastify instance
+let backendUrl = null   // e.g. http://127.0.0.1:3000 — exposed to renderer
+
+async function startBackend(config) {
+  if (backendApp) return backendUrl
+
+  // Dynamic import so this CJS main can pull in the ESM backend modules.
+  const appModule    = await importBackend('src/app.js')
+  const dbModule     = await importBackend('src/config/db.js')
+  const runnerModule = await importBackend('src/migrations/runner.js')
+
+  const port = 3000
+  backendApp = await appModule.startServer(config, { port, host: '127.0.0.1' })
+  backendUrl = `http://127.0.0.1:${port}`
+
+  // Apply pending migrations using the same pool the server's now using.
+  const applied = await runnerModule.runPendingMigrations(dbModule.db, migrationsDir)
+  if (applied.length > 0) {
+    backendApp.log.info(`Applied ${applied.length} migration(s): ${applied.join(', ')}`)
+  }
+  return backendUrl
+}
+
+// ── IPC: setup wizard ──────────────────────────────────────────────────────
+
+ipcMain.handle('setup:get-state', async () => {
+  const config = await readConfig()
+  return {
+    configured: !!config?.setupComplete,
+    backendUrl,                                  // null until backend is up
+    migrationsDir,                               // useful for diagnostics
+  }
+})
+
+ipcMain.handle('setup:test-connection', async (_e, dbConfig) => {
+  const dbModule = await importBackend('src/config/db.js')
+  try {
+    await dbModule.testConnection(dbConfig)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+ipcMain.handle('setup:save-and-start', async (_e, { db: dbConfig }) => {
+  // Generate a JWT secret on first save (kept across reconfigurations so
+  // existing tokens don't get invalidated if the user re-runs setup).
+  const existing = await readConfig()
+  const config = {
+    db: dbConfig,
+    jwtSecret: existing?.jwtSecret ?? crypto.randomBytes(48).toString('hex'),
+    setupComplete: false,                        // flipped after first user lands
+  }
+  await writeConfig(config)
+
+  try {
+    const url = await startBackend(config)
+    return { ok: true, backendUrl: url }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+ipcMain.handle('setup:mark-complete', async () => {
+  const config = await readConfig()
+  if (!config) return { ok: false, error: 'No config to update.' }
+  await writeConfig({ ...config, setupComplete: true })
+  return { ok: true }
+})
+
+// ── IPC: PDF export (unchanged from before) ─────────────────────────────────
+
 ipcMain.handle('export-pdf', async (event, { defaultFilename = 'report.pdf' } = {}) => {
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win) return { ok: false, error: 'No window' }
@@ -27,19 +131,17 @@ ipcMain.handle('export-pdf', async (event, { defaultFilename = 'report.pdf' } = 
   try {
     const buffer = await event.sender.printToPDF({
       printBackground:   true,
-      // Let the @page rule in index.css drive page size + margins so the
-      // CSS is the single source of truth. Without this flag Electron
-      // would override CSS margins with its own defaults.
       preferCSSPageSize: true,
     })
     await fs.writeFile(filePath, buffer)
-    // Reveal in OS file manager so the user can find it immediately.
     shell.showItemInFolder(filePath)
     return { ok: true, path: filePath }
   } catch (err) {
     return { ok: false, error: err.message }
   }
 })
+
+// ── Window ──────────────────────────────────────────────────────────────────
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -59,7 +161,6 @@ function createWindow() {
   win.setMenuBarVisibility(false)
   win.on('ready-to-show', () => win.show())
 
-  // In dev, electron-vite sets ELECTRON_RENDERER_URL to the Vite dev server
   if (process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(process.env.ELECTRON_RENDERER_URL)
     win.webContents.openDevTools()
@@ -68,7 +169,19 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(createWindow)
+app.whenReady().then(async () => {
+  // If we have a saved config, start the backend up front so the login screen
+  // works immediately. If we don't, the renderer will show the setup wizard,
+  // which calls setup:save-and-start to bring the backend up.
+  try {
+    const config = await readConfig()
+    if (config) await startBackend(config)
+  } catch (err) {
+    console.error('Backend failed to start with saved config:', err.message)
+    // Fall through — the renderer will surface the error and offer re-setup.
+  }
+  createWindow()
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

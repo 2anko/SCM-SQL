@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "preview": "electron-vite preview"
+    "preview": "electron-vite preview",
+    "package": "npm run build && electron-builder",
+    "package:win": "npm run build && electron-builder --win",
+    "package:mac": "npm run build && electron-builder --mac",
+    "package:linux": "npm run build && electron-builder --linux"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.4",
@@ -25,8 +29,66 @@
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "electron": "^33.3.1",
+    "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17"
+  },
+  "build": {
+    "appId": "com.scm-sql.supply-chain-manager",
+    "productName": "SCM",
+    "copyright": "Copyright © 2026",
+    "asar": true,
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend",
+        "to": "backend",
+        "filter": [
+          "**/*",
+          "!.env",
+          "!.env.example",
+          "!**/.cache/**",
+          "!**/*.log",
+          "!**/test/**",
+          "!**/__tests__/**",
+          "!**/.git/**"
+        ]
+      },
+      {
+        "from": "../sql/migrations",
+        "to": "sql/migrations",
+        "filter": [
+          "**/*.sql"
+        ]
+      }
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "win": {
+      "target": "nsis",
+      "artifactName": "SCM-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "SCM"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.business"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Office"
+    }
   }
 }

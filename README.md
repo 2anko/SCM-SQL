@@ -143,8 +143,60 @@ SCM-SQL/
 
 ---
 
+## End-user configuration
+
+On first launch a packaged app shows a **setup wizard** that:
+
+1. Collects PostgreSQL connection details (host, port, database, user, password) and runs a test connection.
+2. Saves them to `%APPDATA%\SCM\config.json` along with an auto-generated JWT secret.
+3. Boots the embedded Fastify backend in the Electron main process and runs any pending SQL migrations from `sql/migrations/` against the user's database (tracked via a `schema_migrations` table).
+4. Creates the first `it_service` administrator account.
+
+If the user wipes `config.json` (or the file is corrupted), the wizard runs again on next launch. The backend is in-process, so there's no second Node process to manage and no port to conflict over (it listens on `127.0.0.1:3000`).
+
+## Packaging the desktop app
+
+`electron-builder` is wired up. Before your first build, make sure both projects have their dependencies installed:
+
+```powershell
+# from repo root
+cd backend  ; npm install
+cd ../frontend ; npm install
+```
+
+Then from `frontend/`:
+
+```powershell
+npm run package:win      # Windows installer (.exe) → frontend/dist/
+npm run package:mac      # macOS .dmg → frontend/dist/
+npm run package:linux    # Linux AppImage → frontend/dist/
+npm run package          # current platform
+```
+
+What gets bundled:
+
+- The renderer + main + preload built output (`frontend/out/`), packed into `app.asar`.
+- The entire `backend/` folder (source + `node_modules` + `package.json`), as **extraResources** alongside the asar.
+- The `sql/migrations/*.sql` files, also as extraResources.
+- A standard Electron runtime.
+
+What gets excluded:
+- `backend/.env` / `.env.example` (filtered out — no leaked dev secrets).
+- `**/.cache/**`, log files, and test folders inside the backend.
+
+At runtime the Electron main process detects packaged mode and resolves the backend at `process.resourcesPath/backend/`, the migrations at `process.resourcesPath/sql/migrations/` — no environment variables required.
+
+The Windows installer is NSIS-based: per-user install (no admin prompt), lets the user pick the install folder, creates Desktop + Start Menu shortcuts named "SCM".
+
+### Before shipping to real users
+
+- **Code-sign the installer** (Windows SmartScreen will warn loudly otherwise). Buy a code-signing certificate (~$200/year), then add `"win": { "certificateFile": "...", "certificatePassword": "..." }` to the build config.
+- **Add an app icon**. Drop `build/icon.ico` (Windows), `build/icon.icns` (macOS), `build/icon.png` (Linux) in `frontend/build/` and electron-builder picks them up automatically.
+- **Bump the version** in `frontend/package.json` per release; the installer filename uses `${version}`.
+- **Test on a clean Windows VM** (no Node, no Docker, no dev tools) — see the "Testing" section of the development guide.
+
 ## Planned
 
-- **First-run setup** — screen to create the initial `it_service` account on a fresh install
-- **Low-stock alerts** — configurable reorder-point notifications on the Dashboard
-- **Packaging** — bundle backend + Electron into a single `.exe` using electron-builder
+- **Low-stock alerts** — configurable reorder-point notifications on the Dashboard.
+- **Reconfigure-DB UI** — an it_service-only screen to edit the saved connection without deleting `config.json`.
+- **Auto-update** — Electron's autoUpdater + a release channel so customers get patches without re-downloading the installer.
