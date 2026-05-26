@@ -62,7 +62,7 @@ export default async function setupRoutes(app) {
       const password_hash = await bcrypt.hash(password, 12);
       const { rows: [user] } = await db.query(
         `INSERT INTO users (email, password_hash, role)
-         VALUES ($1, $2, 'it_service')
+         VALUES ($1, $2, 'dev')
          RETURNING id, email, role`,
         [email, password_hash]
       );

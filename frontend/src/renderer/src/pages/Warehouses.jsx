@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { api } from '../api/client'
 import { useAuth } from '../context/AuthContext'
+import { getPermissions } from '../lib/permissions'
 import DataTable from '../components/ui/DataTable'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
@@ -13,12 +14,7 @@ const EMPTY = { name: '', address: '', country: '' }
 
 export default function Warehouses() {
   const { user } = useAuth()
-  // TODO(dev-only): remove 'dev' role checks before shipping
-  const isDev     = user?.role === 'dev'
-  //########################################################
-  const canCreate = isDev || user?.role === 'employee'
-  const canEdit   = isDev || user?.role === 'section_manager'
-  const canDelete = isDev || user?.role === 'section_manager'
+  const { canCreate, canEdit, canDelete } = getPermissions(user)
 
   const [warehouses, setWarehouses] = useState([])
   const [loading, setLoading]       = useState(true)

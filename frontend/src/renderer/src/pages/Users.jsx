@@ -10,12 +10,13 @@ import {
 } from '../components/ui/dialog'
 import { date as fmtDate } from '../lib/format'
 
-const ROLES = ['head_manager', 'section_manager', 'employee', 'it_service']
+const ROLES = ['dev', 'head_manager', 'section_manager', 'employee', 'it_service']
 const ROLE_LABELS = {
+  dev:             'Dev (full access)',
   head_manager:    'Head Manager (read-only)',
-  section_manager: 'Section Manager (edit & delete)',
-  employee:        'Employee (read & add)',
-  it_service:      'IT Service (manage users)',
+  section_manager: 'Section Manager (read, add, edit, delete)',
+  employee:        'Employee (read, add, edit)',
+  it_service:      'IT Service (read & manage users)',
 }
 
 export default function Users() {

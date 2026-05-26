@@ -9,17 +9,13 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '../components/ui/dialog'
 import { money as fmt } from '../lib/format'
+import { getPermissions } from '../lib/permissions'
 
 const EMPTY = { sku: '', name: '', description: '', unit_of_measure: '', value: '' }
 
 export default function Items() {
   const { user } = useAuth()
-  // TODO(dev-only): remove 'dev' role checks before shipping
-  const isDev     = user?.role === 'dev'
-  //#########################################################
-  const canCreate = isDev || user?.role === 'employee'
-  const canEdit   = isDev || user?.role === 'section_manager'
-  const canDelete = isDev || user?.role === 'section_manager'
+  const { canCreate, canEdit, canDelete } = getPermissions(user)
 
   const [items, setItems]   = useState([])
   const [loading, setLoading] = useState(true)

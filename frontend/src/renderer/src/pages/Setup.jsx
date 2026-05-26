@@ -143,8 +143,9 @@ export default function Setup({ onComplete }) {
         {step === 3 && (
           <form onSubmit={handleCreateAdmin} className="space-y-3">
             <p className="text-sm text-gray-700">
-              Create the first user. They'll be assigned the <strong>it_service</strong> role,
-              which lets them create everyone else from the Users page.
+              Create the first user. They'll be assigned the <strong>dev</strong> role,
+              which has full access — they can manage data and create everyone else from
+              the Users page.
             </p>
             <div><Label>Email *</Label>           <Input className="mt-1" type="email"    value={admin.email}    onChange={f('admin', 'email')}    required /></div>
             <div><Label>Password *</Label>        <Input className="mt-1" type="password" value={admin.password} onChange={f('admin', 'password')} required minLength={8} /></div>

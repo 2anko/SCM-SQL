@@ -2,7 +2,7 @@
 import { getAllUsers, createUser, updateUser } from '../queries/users.js';
 import { authorize } from '../middleware/authorize.js';
 
-const ROLES = ['head_manager', 'section_manager', 'employee', 'it_service'];
+const ROLES = ['dev', 'head_manager', 'section_manager', 'employee', 'it_service'];
 
 const createSchema = {
   body: {

@@ -11,6 +11,7 @@ import {
 import SummaryPieChart from '../components/SummaryPieChart'
 import PrintableReport from '../components/PrintableReport'
 import { exportPDF, defaultPdfName } from '../api/pdf'
+import { getPermissions } from '../lib/permissions'
 import { money as fmtMoney, datetime as fmtDate } from '../lib/format'
 
 const TXN_TYPES = ['ADJUSTMENT', 'RETURN_IN', 'RETURN_OUT']
@@ -22,9 +23,7 @@ const TXN_LABELS = {
 
 export default function Inventory() {
   const { user } = useAuth()
-  // TODO(dev-only): remove 'dev' role checks before shipping
-  const isDev     = user?.role === 'dev'
-  const canCreate = isDev || user?.role === 'employee'
+  const { canCreate } = getPermissions(user)
 
   const [tab, setTab]                 = useState('stock')
   const [stock, setStock]             = useState([])

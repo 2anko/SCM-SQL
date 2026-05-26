@@ -13,6 +13,7 @@ import PrintableReport from '../components/PrintableReport'
 import { exportPDF, defaultPdfName } from '../api/pdf'
 import { money as fmt, date as fmtDate } from '../lib/format'
 import { getDueUrgency, urgencyPhrase, URGENCY_TEXT, SO_IN_FLIGHT } from '../lib/orderStatus'
+import { getPermissions } from '../lib/permissions'
 import UrgencyBanner from '../components/UrgencyBanner'
 
 const STATUSES = ['DRAFT', 'CONFIRMED', 'PARTIALLY_SHIPPED', 'SHIPPED', 'DELIVERED', 'CANCELLED']
@@ -43,10 +44,7 @@ const EMPTY_LINE = { item_id: '', quantity_ordered: '', unit_price: '', source_w
 
 export default function SalesOrders() {
   const { user } = useAuth()
-  // TODO(dev-only): remove 'dev' role checks before shipping
-  const isDev     = user?.role === 'dev'
-  const canCreate = isDev || user?.role === 'employee'
-  const canWrite  = isDev || user?.role === 'section_manager'
+  const { canCreate, canWrite } = getPermissions(user)
 
   const [sos, setSos]               = useState([])
   const [loading, setLoading]       = useState(true)
