@@ -10,6 +10,21 @@
 import bcrypt from 'bcryptjs';
 import { db, testConnection } from '../config/db.js';
 
+// Roles that can administer the system (manage users). If at least one ACTIVE
+// account with one of these roles exists, the database is considered "already
+// administered" — a new client connecting to it should go straight to login
+// rather than bootstrap another admin.
+const ADMIN_ROLES = ['dev', 'it_service'];
+
+async function activeAdminCount(database) {
+  const { rows: [{ count }] } = await database.query(
+    `SELECT COUNT(*)::int AS count FROM users
+      WHERE role = ANY($1) AND is_active = true`,
+    [ADMIN_ROLES]
+  );
+  return count;
+}
+
 const dbConfigSchema = {
   type: 'object',
   additionalProperties: false,
@@ -47,26 +62,35 @@ export default async function setupRoutes(app) {
     }
   );
 
+  // "needed" means: no active admin-capable account exists, so the setup
+  // wizard should prompt to create one. If the DB already has a dev/it_service
+  // account (e.g. an existing company database), this returns false and the
+  // app routes straight to login.
   app.get('/needs-first-user', async () => {
-    const { rows: [{ count }] } = await db.query('SELECT COUNT(*)::int AS count FROM users');
-    return { needed: count === 0 };
+    return { needed: (await activeAdminCount(db)) === 0 };
   });
 
   app.post('/first-user', { schema: firstUserSchema },
     async (req, rep) => {
-      const { rows: [{ count }] } = await db.query('SELECT COUNT(*)::int AS count FROM users');
-      if (count > 0) {
-        return rep.code(409).send({ error: 'Setup already complete — a user account exists.' });
+      if ((await activeAdminCount(db)) > 0) {
+        return rep.code(409).send({ error: 'An administrator account already exists. Sign in instead.' });
       }
       const { email, password } = req.body;
       const password_hash = await bcrypt.hash(password, 12);
-      const { rows: [user] } = await db.query(
-        `INSERT INTO users (email, password_hash, role)
-         VALUES ($1, $2, 'dev')
-         RETURNING id, email, role`,
-        [email, password_hash]
-      );
-      return rep.code(201).send(user);
+      try {
+        const { rows: [user] } = await db.query(
+          `INSERT INTO users (email, password_hash, role)
+           VALUES ($1, $2, 'dev')
+           RETURNING id, email, role`,
+          [email, password_hash]
+        );
+        return rep.code(201).send(user);
+      } catch (err) {
+        if (err.code === '23505') {
+          return rep.code(409).send({ error: 'A user with that email already exists.' });
+        }
+        throw err;
+      }
     }
   );
 }

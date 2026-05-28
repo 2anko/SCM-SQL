@@ -57,13 +57,28 @@ async function startBackend(config) {
   const runnerModule = await importBackend('src/migrations/runner.js')
 
   const port = 3000
-  backendApp = await appModule.startServer(config, { port, host: '127.0.0.1' })
+  try {
+    backendApp = await appModule.startServer(config, { port, host: '127.0.0.1' })
+  } catch (err) {
+    if (err.code === 'EADDRINUSE') {
+      // Port 3000 is already serving — almost always a separately-run dev
+      // backend (`npm run dev` in backend/). Use that one instead of starting
+      // our own. Migrations are that backend's responsibility, so we skip them.
+      backendUrl = `http://127.0.0.1:${port}`
+      console.log('Port 3000 already in use — using the external backend already running there (dev mode). Skipping embedded backend + migrations.')
+      return backendUrl
+    }
+    throw err
+  }
   backendUrl = `http://127.0.0.1:${port}`
 
   // Apply pending migrations using the same pool the server's now using.
-  const applied = await runnerModule.runPendingMigrations(dbModule.db, migrationsDir)
+  const { applied, adopted } = await runnerModule.runPendingMigrations(dbModule.db, migrationsDir)
   if (applied.length > 0) {
     backendApp.log.info(`Applied ${applied.length} migration(s): ${applied.join(', ')}`)
+  }
+  if (adopted.length > 0) {
+    backendApp.log.info(`Adopted ${adopted.length} pre-existing migration(s) — DB already populated.`)
   }
   return backendUrl
 }

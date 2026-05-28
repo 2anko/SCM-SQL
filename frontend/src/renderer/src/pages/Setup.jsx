@@ -22,8 +22,12 @@ const DEFAULTS = {
   password: '',
 }
 
-export default function Setup({ onComplete }) {
-  const [step, setStep] = useState(1)
+export default function Setup({ onComplete, startAtStep = 1 }) {
+  // When startAtStep is 3, App.jsx has detected that DB config already exists
+  // and the backend is running — the user just needs to create the first
+  // admin. We disable the Back button in that mode so they can't accidentally
+  // re-trigger the config write/migration steps with stale or wrong input.
+  const [step, setStep] = useState(startAtStep)
   const [db, setDb]     = useState(DEFAULTS)
   const [admin, setAdmin] = useState({ email: '', password: '', confirm: '' })
   const [busy, setBusy] = useState(false)
@@ -62,6 +66,21 @@ export default function Setup({ onComplete }) {
     try {
       const r = await window.electron.setup.saveAndStart({ db: dbPayload() })
       if (!r.ok) { setError(r.error || 'Failed to start backend.'); return }
+
+      // If this database already has an admin-capable account (e.g. we just
+      // connected a new PC to an existing company database), there's no need
+      // to create another admin — finish setup and drop straight to login.
+      try {
+        const { needed } = await api.get('/setup/needs-first-user')
+        if (!needed) {
+          await window.electron.setup.markComplete()
+          onComplete?.()
+          return
+        }
+      } catch {
+        // If the check fails, fall through to manual admin creation rather
+        // than blocking the user.
+      }
       setStep(3)
     } finally { setBusy(false) }
   }
@@ -154,7 +173,9 @@ export default function Setup({ onComplete }) {
             {error && <p className="text-sm text-red-600">{error}</p>}
 
             <div className="flex justify-between pt-2">
-              <Button type="button" variant="outline" onClick={() => setStep(2)} disabled={busy}>Back</Button>
+              {startAtStep < 3
+                ? <Button type="button" variant="outline" onClick={() => setStep(2)} disabled={busy}>Back</Button>
+                : <span />}
               <Button type="submit" disabled={busy}>{busy ? 'Creating…' : 'Create admin & finish'}</Button>
             </div>
           </form>

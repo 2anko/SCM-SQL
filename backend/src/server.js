@@ -33,9 +33,12 @@ try {
   const app = await startServer(config, { port });
 
   // Run migrations using the same pool the app uses.
-  const applied = await runPendingMigrations(db, migrationsDir);
+  const { applied, adopted } = await runPendingMigrations(db, migrationsDir);
   if (applied.length > 0) {
     app.log.info(`Applied ${applied.length} migration${applied.length === 1 ? '' : 's'}: ${applied.join(', ')}`);
+  }
+  if (adopted.length > 0) {
+    app.log.info(`Adopted ${adopted.length} pre-existing migration${adopted.length === 1 ? '' : 's'} (DB already populated, no re-execution).`);
   }
 
   const shutdown = async () => {

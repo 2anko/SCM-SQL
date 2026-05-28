@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
+import { api } from './api/client'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Setup from './pages/Setup'
@@ -20,25 +21,47 @@ function ProtectedLayout() {
   return <Layout><Outlet /></Layout>
 }
 
+/**
+ * Boot routing decisions:
+ *
+ *   - No config saved                    → Setup wizard, step 1
+ *   - Config saved + DB unreachable      → Setup wizard, step 1 (re-config)
+ *   - Config saved + DB has no users     → Setup wizard, step 3 (create admin)
+ *   - Config saved + DB has users        → Login → app
+ *
+ * The user-existence check is what catches the "config.json survived an
+ * uninstall, but the DB was wiped" case. We never want to land on Login if
+ * there's no possible credential that would work.
+ */
 export default function App() {
   const { token } = useAuth()
-  const [setupState, setSetupState] = useState(null)  // null = still loading
+  const [bootState, setBootState] = useState(null)
+  //   { mode: 'loading' | 'setup' | 'app', startAtStep?: 1|2|3, error?: string }
 
-  // On boot, ask the main process whether a saved DB config exists.
-  // If not, show the wizard before anything else.
   useEffect(() => {
-    if (!window.electron?.setup) {
-      // Running in a browser tab without the preload bridge — assume already
-      // configured (dev backend started via `npm run dev` in backend/).
-      setSetupState({ configured: true })
-      return
+    async function decide() {
+      // The DATABASE is the source of truth — not config.json. Ask the backend
+      // whether an admin account exists. This works identically for:
+      //   - the embedded backend in a packaged app (main starts it from the
+      //     saved config before the window opens), and
+      //   - a separately-run dev backend on :3000 (npm run dev in backend/).
+      //
+      // /setup/needs-first-user is unauthenticated and returns { needed }.
+      //   reachable + has admin   → login
+      //   reachable + no admin    → wizard step 3 (just create the admin)
+      //   unreachable             → wizard step 1 (no DB configured, or it's
+      //                             down — collect connection details)
+      try {
+        const { needed } = await api.get('/setup/needs-first-user')
+        setBootState({ mode: needed ? 'setup' : 'app', startAtStep: needed ? 3 : 1 })
+      } catch {
+        setBootState({ mode: 'setup', startAtStep: 1 })
+      }
     }
-    window.electron.setup.getState().then(setSetupState).catch(() => {
-      setSetupState({ configured: true })   // fail open
-    })
+    decide()
   }, [])
 
-  if (!setupState) {
+  if (!bootState) {
     return (
       <div className="min-h-screen flex items-center justify-center text-sm text-gray-500">
         Loading…
@@ -46,9 +69,13 @@ export default function App() {
     )
   }
 
-  if (!setupState.configured) {
-    // Reload after wizard completes so the now-running backend serves /auth/login.
-    return <Setup onComplete={() => window.location.reload()} />
+  if (bootState.mode === 'setup') {
+    return (
+      <Setup
+        startAtStep={bootState.startAtStep ?? 1}
+        onComplete={() => window.location.reload()}
+      />
+    )
   }
 
   return (
