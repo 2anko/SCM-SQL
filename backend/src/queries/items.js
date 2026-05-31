@@ -1,4 +1,5 @@
 // queries/items.js
+import { paginatedResult } from '../helpers/pagination.js';
 
 /**
  * Recompute and persist items.value as the weighted-average cost across all
@@ -28,13 +29,23 @@ export async function recomputeItemValue(client, itemId) {
   `, [itemId]);
 }
 
-export async function getAllItems(db) {
+export async function getAllItems(db, { paginated, page, pageSize, limit, offset } = {}) {
+  const values = [];
+  const totalCol = paginated ? ', COUNT(*) OVER() AS total_count' : '';
+  let limitClause = '';
+  if (paginated) {
+    values.push(limit);  const limitIdx  = values.length;
+    values.push(offset); const offsetIdx = values.length;
+    limitClause = `LIMIT $${limitIdx} OFFSET $${offsetIdx}`;
+  }
   const { rows } = await db.query(`
     SELECT id, sku, name, description, unit_of_measure, value, created_at
+      ${totalCol}
     FROM items
     ORDER BY name
-  `);
-  return rows;
+    ${limitClause}
+  `, values);
+  return paginated ? paginatedResult(rows, { page, pageSize }) : rows;
 }
 
 export async function getItemById(db, id) {

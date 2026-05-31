@@ -9,6 +9,7 @@ import {
   updatePurchaseOrderStatus,
 } from '../queries/purchaseOrders.js';
 import { authorize } from '../middleware/authorize.js';
+import { parsePagination } from '../helpers/pagination.js';
 
 const PO_STATUSES = ['DRAFT', 'SENT', 'CONFIRMED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED'];
 
@@ -102,7 +103,7 @@ const summaryQuerySchema = {
 
 export default async function poRoutes(app) {
   app.get('/', { preHandler: authorize('read'), schema: listQuerySchema },
-    async (req) => getAllPurchaseOrders(req.db, { status: req.query.status })
+    async (req) => getAllPurchaseOrders(req.db, { status: req.query.status, ...parsePagination(req.query) })
   );
   app.get('/summary', { preHandler: authorize('read'), schema: summaryQuerySchema },
     async (req) => getPurchaseOrderSummary(req.db, req.query)

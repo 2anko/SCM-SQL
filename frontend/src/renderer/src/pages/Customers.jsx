@@ -16,7 +16,9 @@ export default function Customers() {
   const { user } = useAuth()
   const { isDev, canCreate, canEdit, canDelete } = getPermissions(user)
 
-  const [customers, setCustomers] = useState([])
+  const PAGE_SIZE = 50
+  const [customers, setCustomers] = useState({ rows: [], total: 0 })
+  const [page, setPage]           = useState(1)
   const [loading, setLoading]     = useState(true)
   const [dialog, setDialog]       = useState(null)
   const [form, setForm]           = useState(EMPTY)
@@ -27,13 +29,17 @@ export default function Customers() {
 
   async function load() {
     setLoading(true)
-    try { setCustomers(await api.get('/customers')) }
+    try {
+      const qs = new URLSearchParams({ page, pageSize: PAGE_SIZE })
+      setCustomers(await api.get(`/customers?${qs}`))
+    }
     finally { setLoading(false) }
   }
   async function loadItems() {
     setAllItems(await api.get('/items'))
   }
-  useEffect(() => { load(); loadItems() }, [])
+  useEffect(() => { loadItems() }, [])
+  useEffect(() => { load() }, [page])
 
   function openAdd() {
     setForm(EMPTY); setError(''); setDialog({ mode: 'add' })
@@ -115,7 +121,13 @@ export default function Customers() {
         {canCreate && <Button onClick={openAdd}>Add Customer</Button>}
       </div>
 
-      <DataTable columns={columns} data={customers} isLoading={loading} emptyMessage="No customers yet" />
+      <DataTable
+        columns={columns}
+        data={customers.rows}
+        isLoading={loading}
+        emptyMessage="No customers yet"
+        pagination={{ page, pageSize: PAGE_SIZE, total: customers.total, onPageChange: setPage }}
+      />
 
       <Dialog open={isFormOpen} onOpenChange={open => !open && setDialog(null)}>
         <DialogContent>

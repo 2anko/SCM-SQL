@@ -3,6 +3,7 @@ import { getAllItems, getItemById, createItem, updateItem, deleteItem } from '..
 import { getSuppliersByItem } from '../queries/supplierItems.js';
 import { getCustomersByItem } from '../queries/customerItems.js';
 import { authorize } from '../middleware/authorize.js';
+import { parsePagination } from '../helpers/pagination.js';
 
 const createSchema = {
   body: {
@@ -34,7 +35,7 @@ const updateSchema = {
 
 export default async function itemRoutes(app) {
   app.get('/',      { preHandler: authorize('read') },
-    async (req) => getAllItems(req.db)
+    async (req) => getAllItems(req.db, parsePagination(req.query))
   );
   app.get('/:id',   { preHandler: authorize('read') },
     async (req, rep) => {

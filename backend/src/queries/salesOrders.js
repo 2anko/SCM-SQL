@@ -1,4 +1,5 @@
 // queries/salesOrders.js
+import { paginatedResult } from '../helpers/pagination.js';
 
 /**
  * Aggregate SO data for a date range.
@@ -51,9 +52,17 @@ export async function getSalesOrderSummary(db, { from, to }) {
   };
 }
 
-export async function getAllSalesOrders(db, { status } = {}) {
+export async function getAllSalesOrders(db, { status, paginated, page, pageSize, limit, offset } = {}) {
   const values = [];
   const where  = status ? (values.push(status), `WHERE so.status = $1`) : '';
+
+  const totalCol = paginated ? ', COUNT(*) OVER() AS total_count' : '';
+  let limitClause = '';
+  if (paginated) {
+    values.push(limit);  const limitIdx  = values.length;
+    values.push(offset); const offsetIdx = values.length;
+    limitClause = `LIMIT $${limitIdx} OFFSET $${offsetIdx}`;
+  }
 
   const { rows } = await db.query(`
     SELECT
@@ -64,14 +73,17 @@ export async function getAllSalesOrders(db, { status } = {}) {
       so.created_at,
       COUNT(sol.id)                             AS line_count,
       SUM(sol.quantity_ordered * sol.unit_price) AS total_value
+      ${totalCol}
     FROM sales_orders so
     JOIN customers c ON c.id = so.customer_id
     LEFT JOIN sales_order_lines sol ON sol.so_id = so.id
     ${where}
     GROUP BY so.id, c.name
     ORDER BY so.created_at DESC
+    ${limitClause}
   `, values);
-  return rows;
+
+  return paginated ? paginatedResult(rows, { page, pageSize }) : rows;
 }
 
 export async function getSalesOrderById(db, id) {

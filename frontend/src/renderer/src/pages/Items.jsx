@@ -17,7 +17,9 @@ export default function Items() {
   const { user } = useAuth()
   const { canCreate, canEdit, canDelete } = getPermissions(user)
 
-  const [items, setItems]   = useState([])
+  const PAGE_SIZE = 50
+  const [items, setItems]   = useState({ rows: [], total: 0 })
+  const [page, setPage]     = useState(1)
   const [loading, setLoading] = useState(true)
   const [dialog, setDialog]   = useState(null)
   const [form, setForm]       = useState(EMPTY)
@@ -27,10 +29,13 @@ export default function Items() {
 
   async function load() {
     setLoading(true)
-    try { setItems(await api.get('/items')) }
+    try {
+      const qs = new URLSearchParams({ page, pageSize: PAGE_SIZE })
+      setItems(await api.get(`/items?${qs}`))
+    }
     finally { setLoading(false) }
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [page])
 
   function openAdd() {
     setForm(EMPTY); setError(''); setDialog({ mode: 'add' })
@@ -106,7 +111,13 @@ export default function Items() {
         {canCreate && <Button onClick={openAdd}>Add Item</Button>}
       </div>
 
-      <DataTable columns={columns} data={items} isLoading={loading} emptyMessage="No items yet" />
+      <DataTable
+        columns={columns}
+        data={items.rows}
+        isLoading={loading}
+        emptyMessage="No items yet"
+        pagination={{ page, pageSize: PAGE_SIZE, total: items.total, onPageChange: setPage }}
+      />
 
       <Dialog open={isFormOpen} onOpenChange={open => !open && setDialog(null)}>
         <DialogContent>

@@ -48,7 +48,9 @@ export default function PurchaseOrders() {
   const { user } = useAuth()
   const { canCreate, canWrite } = getPermissions(user)
 
-  const [pos, setPos]               = useState([])
+  const PAGE_SIZE = 50
+  const [pos, setPos]               = useState({ rows: [], total: 0 })
+  const [page, setPage]             = useState(1)
   const [loading, setLoading]       = useState(true)
   const [statusFilter, setStatusFilter] = useState('')
   const [suppliers, setSuppliers]   = useState([])
@@ -65,8 +67,9 @@ export default function PurchaseOrders() {
   async function load() {
     setLoading(true)
     try {
-      const path = `/purchase-orders${statusFilter ? `?status=${statusFilter}` : ''}`
-      setPos(await api.get(path))
+      const qs = new URLSearchParams({ page, pageSize: PAGE_SIZE })
+      if (statusFilter) qs.set('status', statusFilter)
+      setPos(await api.get(`/purchase-orders?${qs}`))
     } finally { setLoading(false) }
   }
   async function loadDropdowns() {
@@ -75,10 +78,12 @@ export default function PurchaseOrders() {
   }
 
   useEffect(() => { loadDropdowns() }, [])
-  useEffect(() => { load() }, [statusFilter])
+  useEffect(() => { setPage(1) }, [statusFilter])
+  useEffect(() => { load() }, [statusFilter, page])
 
-  // Tag each PO with its urgency once; reused by the column renders + banner.
-  const urgent = pos
+  // Urgency among the POs on the CURRENT page (banner is a per-page view;
+  // the Dashboard shows the complete cross-page urgency picture).
+  const urgent = pos.rows
     .map(p => ({ po: p, ...getDueUrgency(p, PO_IN_FLIGHT) }))
     .filter(u => u.level)
   const overdueCount = urgent.filter(u => u.level === 'overdue' || u.level === 'today').length
@@ -144,10 +149,11 @@ export default function PurchaseOrders() {
 
       <DataTable
         columns={columns}
-        data={pos}
+        data={pos.rows}
         isLoading={loading}
         emptyMessage="No purchase orders yet"
         onRowClick={r => setDetailId(r.id)}
+        pagination={{ page, pageSize: PAGE_SIZE, total: pos.total, onPageChange: setPage }}
       />
 
       {showAdd && (

@@ -25,14 +25,16 @@ export default function Inventory() {
   const { user } = useAuth()
   const { canCreate } = getPermissions(user)
 
+  const PAGE_SIZE = 50
   const [tab, setTab]                 = useState('stock')
-  const [stock, setStock]             = useState([])
-  const [history, setHistory]         = useState([])
+  const [stock, setStock]             = useState({ rows: [], total: 0 })
+  const [history, setHistory]         = useState({ rows: [], total: 0 })
   const [warehouses, setWarehouses]   = useState([])
   const [items, setItems]             = useState([])
   const [loading, setLoading]         = useState(true)
   const [warehouseId, setWarehouseId] = useState('')
   const [itemId, setItemId]           = useState('')
+  const [page, setPage]               = useState(1)
 
   const [transferOpen, setTransferOpen] = useState(false)
   const [txnOpen, setTxnOpen]           = useState(false)
@@ -41,21 +43,19 @@ export default function Inventory() {
   async function loadStock() {
     setLoading(true)
     try {
-      const qs = new URLSearchParams()
+      const qs = new URLSearchParams({ page, pageSize: PAGE_SIZE })
       if (warehouseId) qs.set('warehouseId', warehouseId)
       if (itemId)      qs.set('itemId',      itemId)
-      const path = `/inventory${qs.toString() ? '?' + qs.toString() : ''}`
-      setStock(await api.get(path))
+      setStock(await api.get(`/inventory?${qs}`))
     } finally { setLoading(false) }
   }
   async function loadHistory() {
     setLoading(true)
     try {
-      const qs = new URLSearchParams()
+      const qs = new URLSearchParams({ page, pageSize: PAGE_SIZE })
       if (warehouseId) qs.set('warehouseId', warehouseId)
       if (itemId)      qs.set('itemId',      itemId)
-      const path = `/inventory/history${qs.toString() ? '?' + qs.toString() : ''}`
-      setHistory(await api.get(path))
+      setHistory(await api.get(`/inventory/history?${qs}`))
     } finally { setLoading(false) }
   }
   async function loadDropdowns() {
@@ -63,11 +63,14 @@ export default function Inventory() {
     setWarehouses(w); setItems(i)
   }
 
+  // Reset to page 1 whenever the tab or a filter changes.
+  useEffect(() => { setPage(1) }, [tab, warehouseId, itemId])
+
   useEffect(() => { loadDropdowns() }, [])
   useEffect(() => {
     if (tab === 'stock') loadStock()
     else                 loadHistory()
-  }, [tab, warehouseId, itemId])
+  }, [tab, warehouseId, itemId, page])
 
   const stockColumns = [
     { header: 'Warehouse', accessor: 'warehouse' },
@@ -139,9 +142,21 @@ export default function Inventory() {
       </div>
 
       {tab === 'stock' ? (
-        <DataTable columns={stockColumns} data={stock} isLoading={loading} emptyMessage="No stock recorded" />
+        <DataTable
+          columns={stockColumns}
+          data={stock.rows}
+          isLoading={loading}
+          emptyMessage="No stock recorded"
+          pagination={{ page, pageSize: PAGE_SIZE, total: stock.total, onPageChange: setPage }}
+        />
       ) : (
-        <DataTable columns={historyColumns} data={history} isLoading={loading} emptyMessage="No transactions yet" />
+        <DataTable
+          columns={historyColumns}
+          data={history.rows}
+          isLoading={loading}
+          emptyMessage="No transactions yet"
+          pagination={{ page, pageSize: PAGE_SIZE, total: history.total, onPageChange: setPage }}
+        />
       )}
 
       {transferOpen && (

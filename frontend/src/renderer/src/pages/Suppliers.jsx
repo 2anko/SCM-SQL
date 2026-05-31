@@ -311,7 +311,9 @@ export default function Suppliers() {
   const { user } = useAuth()
   const { canCreate, canEdit, canDelete } = getPermissions(user)
 
-  const [suppliers, setSuppliers]       = useState([])
+  const PAGE_SIZE = 50
+  const [suppliers, setSuppliers]       = useState({ rows: [], total: 0 })
+  const [page, setPage]                 = useState(1)
   const [loading, setLoading]           = useState(true)
   const [dialog, setDialog]             = useState(null)
   const [form, setForm]                 = useState(EMPTY_SUPPLIER_FORM)
@@ -323,13 +325,17 @@ export default function Suppliers() {
 
   async function load() {
     setLoading(true)
-    try { setSuppliers(await api.get('/suppliers')) }
+    try {
+      const qs = new URLSearchParams({ page, pageSize: PAGE_SIZE })
+      setSuppliers(await api.get(`/suppliers?${qs}`))
+    }
     finally { setLoading(false) }
   }
   async function loadItems() {
     setAllItems(await api.get('/items'))
   }
-  useEffect(() => { load(); loadItems() }, [])
+  useEffect(() => { loadItems() }, [])
+  useEffect(() => { load() }, [page])
 
   function openAdd() {
     setForm({ ...EMPTY_SUPPLIER_FORM, factories: [] })
@@ -438,7 +444,13 @@ export default function Suppliers() {
         {canCreate && <Button onClick={openAdd}>Add Supplier</Button>}
       </div>
 
-      <DataTable columns={columns} data={suppliers} isLoading={loading} emptyMessage="No suppliers yet" />
+      <DataTable
+        columns={columns}
+        data={suppliers.rows}
+        isLoading={loading}
+        emptyMessage="No suppliers yet"
+        pagination={{ page, pageSize: PAGE_SIZE, total: suppliers.total, onPageChange: setPage }}
+      />
 
       <SupplierDialog
         dialog={dialog}
