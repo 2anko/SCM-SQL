@@ -23,6 +23,7 @@ import supplierFactoryRoutes from './routes/supplierFactories.js';
 import supplierItemRoutes    from './routes/supplierItems.js';
 import customerItemRoutes    from './routes/customerItems.js';
 import setupRoutes           from './routes/setup.js';
+import dashboardRoutes       from './routes/dashboard.js';
 
 /**
  * Build a configured Fastify app. Does NOT start listening.
@@ -85,6 +86,7 @@ export function createApp(config) {
   });
 
   app.register(setupRoutes,           { prefix: '/setup' });
+  app.register(dashboardRoutes,       { prefix: '/dashboard' });
   app.register(itemRoutes,            { prefix: '/items' });
   app.register(warehouseRoutes,       { prefix: '/warehouses' });
   app.register(supplierRoutes,        { prefix: '/suppliers' });

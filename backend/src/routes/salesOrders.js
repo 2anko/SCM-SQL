@@ -9,6 +9,7 @@ import {
   shipSalesOrder,
 } from '../queries/salesOrders.js';
 import { authorize } from '../middleware/authorize.js';
+import { parsePagination } from '../helpers/pagination.js';
 
 const SO_STATUSES = ['DRAFT', 'CONFIRMED', 'PARTIALLY_SHIPPED', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
 
@@ -100,7 +101,7 @@ const summaryQuerySchema = {
 
 export default async function soRoutes(app) {
   app.get('/', { preHandler: authorize('read'), schema: listQuerySchema },
-    async (req) => getAllSalesOrders(req.db, { status: req.query.status })
+    async (req) => getAllSalesOrders(req.db, { status: req.query.status, ...parsePagination(req.query) })
   );
   app.get('/summary', { preHandler: authorize('read'), schema: summaryQuerySchema },
     async (req) => getSalesOrderSummary(req.db, req.query)

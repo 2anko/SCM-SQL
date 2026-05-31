@@ -1,5 +1,6 @@
 // routes/customers.js
 import { authorize } from '../middleware/authorize.js';
+import { parsePagination, paginatedResult } from '../helpers/pagination.js';
 
 const createSchema = {
   body: {
@@ -30,9 +31,21 @@ const updateSchema = {
 
 export default async function customerRoutes(app) {
   app.get('/', { preHandler: authorize('read') },
-    async (req) => (await req.db.query(
-      'SELECT * FROM customers WHERE is_active = true ORDER BY name'
-    )).rows
+    async (req) => {
+      const pg = parsePagination(req.query);
+      if (!pg.paginated) {
+        return (await req.db.query(
+          'SELECT * FROM customers WHERE is_active = true ORDER BY name'
+        )).rows;
+      }
+      const { rows } = await req.db.query(
+        `SELECT *, COUNT(*) OVER() AS total_count
+           FROM customers WHERE is_active = true
+          ORDER BY name LIMIT $1 OFFSET $2`,
+        [pg.limit, pg.offset]
+      );
+      return paginatedResult(rows, pg);
+    }
   );
   app.get('/:id', { preHandler: authorize('read') },
     async (req, rep) => {

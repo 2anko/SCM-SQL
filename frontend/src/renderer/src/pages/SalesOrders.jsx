@@ -46,7 +46,9 @@ export default function SalesOrders() {
   const { user } = useAuth()
   const { canCreate, canWrite } = getPermissions(user)
 
-  const [sos, setSos]               = useState([])
+  const PAGE_SIZE = 50
+  const [sos, setSos]               = useState({ rows: [], total: 0 })
+  const [page, setPage]             = useState(1)
   const [loading, setLoading]       = useState(true)
   const [statusFilter, setStatusFilter] = useState('')
   const [customers, setCustomers]   = useState([])
@@ -59,8 +61,9 @@ export default function SalesOrders() {
   async function load() {
     setLoading(true)
     try {
-      const path = `/sales-orders${statusFilter ? `?status=${statusFilter}` : ''}`
-      setSos(await api.get(path))
+      const qs = new URLSearchParams({ page, pageSize: PAGE_SIZE })
+      if (statusFilter) qs.set('status', statusFilter)
+      setSos(await api.get(`/sales-orders?${qs}`))
     } finally { setLoading(false) }
   }
   async function loadDropdowns() {
@@ -69,9 +72,11 @@ export default function SalesOrders() {
   }
 
   useEffect(() => { loadDropdowns() }, [])
-  useEffect(() => { load() }, [statusFilter])
+  useEffect(() => { setPage(1) }, [statusFilter])
+  useEffect(() => { load() }, [statusFilter, page])
 
-  const urgent = sos
+  // Urgency among the SOs on the CURRENT page (Dashboard shows the full picture).
+  const urgent = sos.rows
     .map(s => ({ so: s, ...getDueUrgency(s, SO_IN_FLIGHT) }))
     .filter(u => u.level)
   const overdueCount = urgent.filter(u => u.level === 'overdue' || u.level === 'today').length
@@ -134,10 +139,11 @@ export default function SalesOrders() {
 
       <DataTable
         columns={columns}
-        data={sos}
+        data={sos.rows}
         isLoading={loading}
         emptyMessage="No sales orders yet"
         onRowClick={r => setDetailId(r.id)}
+        pagination={{ page, pageSize: PAGE_SIZE, total: sos.total, onPageChange: setPage }}
       />
 
       {showAdd && (

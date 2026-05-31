@@ -1,6 +1,7 @@
 // routes/inventory.js
 import { getStockLevels, recordTransaction, transferStock, getTransactionHistory, getInventorySummary } from '../queries/inventory.js';
 import { authorize } from '../middleware/authorize.js';
+import { parsePagination } from '../helpers/pagination.js';
 
 const TXN_TYPES = ['RECEIPT', 'SHIPMENT', 'TRANSFER_IN', 'TRANSFER_OUT', 'ADJUSTMENT', 'RETURN_IN', 'RETURN_OUT'];
 
@@ -41,7 +42,7 @@ export default async function inventoryRoutes(app) {
   app.get('/', { preHandler: authorize('read') },
     async (req) => {
       const { warehouseId, itemId } = req.query;
-      return getStockLevels(req.db, { warehouseId, itemId });
+      return getStockLevels(req.db, { warehouseId, itemId, ...parsePagination(req.query) });
     }
   );
   app.get('/summary', { preHandler: authorize('read') },
@@ -49,8 +50,8 @@ export default async function inventoryRoutes(app) {
   );
   app.get('/history', { preHandler: authorize('read') },
     async (req) => {
-      const { itemId, warehouseId, limit } = req.query;
-      return getTransactionHistory(req.db, { itemId, warehouseId, limit });
+      const { itemId, warehouseId } = req.query;
+      return getTransactionHistory(req.db, { itemId, warehouseId, ...parsePagination(req.query) });
     }
   );
   app.post('/transaction', { preHandler: authorize('create'), schema: transactionSchema },

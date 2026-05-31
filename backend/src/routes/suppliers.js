@@ -1,5 +1,6 @@
 // routes/suppliers.js
 import { authorize } from '../middleware/authorize.js';
+import { parsePagination, paginatedResult } from '../helpers/pagination.js';
 
 const createSchema = {
   body: {
@@ -30,13 +31,28 @@ const updateSchema = {
 
 export default async function supplierRoutes(app) {
   app.get('/', { preHandler: authorize('read') },
-    async (req) => (await req.db.query(`
-      SELECT s.*, json_agg(sf.*) FILTER (WHERE sf.id IS NOT NULL) AS factories
-      FROM suppliers s
-      LEFT JOIN supplier_factories sf ON sf.supplier_id = s.id AND sf.is_active = true
-      WHERE s.is_active = true
-      GROUP BY s.id ORDER BY s.name
-    `)).rows
+    async (req) => {
+      const pg = parsePagination(req.query);
+      if (!pg.paginated) {
+        return (await req.db.query(`
+          SELECT s.*, json_agg(sf.*) FILTER (WHERE sf.id IS NOT NULL) AS factories
+          FROM suppliers s
+          LEFT JOIN supplier_factories sf ON sf.supplier_id = s.id AND sf.is_active = true
+          WHERE s.is_active = true
+          GROUP BY s.id ORDER BY s.name
+        `)).rows;
+      }
+      const { rows } = await req.db.query(`
+        SELECT s.*, json_agg(sf.*) FILTER (WHERE sf.id IS NOT NULL) AS factories,
+               COUNT(*) OVER() AS total_count
+        FROM suppliers s
+        LEFT JOIN supplier_factories sf ON sf.supplier_id = s.id AND sf.is_active = true
+        WHERE s.is_active = true
+        GROUP BY s.id ORDER BY s.name
+        LIMIT $1 OFFSET $2
+      `, [pg.limit, pg.offset]);
+      return paginatedResult(rows, pg);
+    }
   );
   app.get('/:id', { preHandler: authorize('read') },
     async (req, rep) => {

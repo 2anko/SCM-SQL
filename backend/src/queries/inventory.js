@@ -1,9 +1,12 @@
 // queries/inventory.js
+import { paginatedResult } from '../helpers/pagination.js';
 
 /**
  * Get current stock levels, optionally filtered by warehouse or item.
+ * When { limit, offset } are passed, returns { rows, total, page, pageSize };
+ * otherwise returns a plain array (back-compat for Dashboard aggregation).
  */
-export async function getStockLevels(db, { warehouseId, itemId } = {}) {
+export async function getStockLevels(db, { warehouseId, itemId, paginated, page, pageSize, limit, offset } = {}) {
   const conditions = [];
   const values = [];
 
@@ -11,6 +14,13 @@ export async function getStockLevels(db, { warehouseId, itemId } = {}) {
   if (itemId)      { values.push(itemId);      conditions.push(`inv.item_id = $${values.length}`); }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const totalCol = paginated ? ', COUNT(*) OVER() AS total_count' : '';
+  let limitClause = '';
+  if (paginated) {
+    values.push(limit);  const limitIdx  = values.length;
+    values.push(offset); const offsetIdx = values.length;
+    limitClause = `LIMIT $${limitIdx} OFFSET $${offsetIdx}`;
+  }
 
   const { rows } = await db.query(`
     SELECT
@@ -23,13 +33,16 @@ export async function getStockLevels(db, { warehouseId, itemId } = {}) {
       i.unit_of_measure,
       inv.quantity,
       inv.updated_at
+      ${totalCol}
     FROM inventory inv
     JOIN warehouses w ON w.id = inv.warehouse_id
     JOIN items i      ON i.id = inv.item_id
     ${where}
     ORDER BY w.name, i.name
+    ${limitClause}
   `, values);
-  return rows;
+
+  return paginated ? paginatedResult(rows, { page, pageSize }) : rows;
 }
 
 /**
@@ -235,9 +248,11 @@ export async function getInventorySummary(db) {
 }
 
 /**
- * Get the full transaction history for an item or warehouse.
+ * Get transaction history for an item or warehouse.
+ * Paginated when { limit, offset } supplied (returns { rows, total, … }).
+ * Without pagination, falls back to a capped 100-row list (legacy behaviour).
  */
-export async function getTransactionHistory(db, { itemId, warehouseId, limit = 100 }) {
+export async function getTransactionHistory(db, { itemId, warehouseId, paginated, page, pageSize, limit, offset } = {}) {
   const conditions = [];
   const values = [];
 
@@ -245,7 +260,17 @@ export async function getTransactionHistory(db, { itemId, warehouseId, limit = 1
   if (warehouseId) { values.push(warehouseId); conditions.push(`t.warehouse_id = $${values.length}`); }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-  values.push(limit);
+
+  const totalCol = paginated ? ', COUNT(*) OVER() AS total_count' : '';
+  let limitClause;
+  if (paginated) {
+    values.push(limit);  const limitIdx  = values.length;
+    values.push(offset); const offsetIdx = values.length;
+    limitClause = `LIMIT $${limitIdx} OFFSET $${offsetIdx}`;
+  } else {
+    values.push(100);    // legacy default cap
+    limitClause = `LIMIT $${values.length}`;
+  }
 
   const { rows } = await db.query(`
     SELECT
@@ -259,6 +284,7 @@ export async function getTransactionHistory(db, { itemId, warehouseId, limit = 1
       t.created_at,
       po.id    AS purchase_order_id,
       so.id    AS sales_order_id
+      ${totalCol}
     FROM inventory_transactions t
     JOIN items      i  ON i.id = t.item_id
     JOIN warehouses w  ON w.id = t.warehouse_id
@@ -266,7 +292,8 @@ export async function getTransactionHistory(db, { itemId, warehouseId, limit = 1
     LEFT JOIN sales_orders    so ON so.id = t.sales_order_id
     ${where}
     ORDER BY t.created_at DESC
-    LIMIT $${values.length}
+    ${limitClause}
   `, values);
-  return rows;
+
+  return paginated ? paginatedResult(rows, { page, pageSize }) : rows;
 }

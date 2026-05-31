@@ -1,9 +1,20 @@
 // queries/purchaseOrders.js
 import { recomputeItemValue } from './items.js';
+import { paginatedResult } from '../helpers/pagination.js';
 
-export async function getAllPurchaseOrders(db, { status } = {}) {
+export async function getAllPurchaseOrders(db, { status, paginated, page, pageSize, limit, offset } = {}) {
   const values = [];
   const where  = status ? (values.push(status), `WHERE po.status = $1`) : '';
+
+  // COUNT(*) OVER() after GROUP BY counts the number of groups (= POs), which
+  // is exactly the total we want for pagination.
+  const totalCol = paginated ? ', COUNT(*) OVER() AS total_count' : '';
+  let limitClause = '';
+  if (paginated) {
+    values.push(limit);  const limitIdx  = values.length;
+    values.push(offset); const offsetIdx = values.length;
+    limitClause = `LIMIT $${limitIdx} OFFSET $${offsetIdx}`;
+  }
 
   const { rows } = await db.query(`
     SELECT
@@ -15,6 +26,7 @@ export async function getAllPurchaseOrders(db, { status } = {}) {
       po.created_at,
       COUNT(pol.id)           AS line_count,
       SUM(pol.quantity_ordered * pol.unit_cost) AS total_value
+      ${totalCol}
     FROM purchase_orders po
     JOIN suppliers         s  ON s.id  = po.supplier_id
     LEFT JOIN supplier_factories sf ON sf.id = po.factory_id
@@ -22,8 +34,10 @@ export async function getAllPurchaseOrders(db, { status } = {}) {
     ${where}
     GROUP BY po.id, s.name, sf.name
     ORDER BY po.created_at DESC
+    ${limitClause}
   `, values);
-  return rows;
+
+  return paginated ? paginatedResult(rows, { page, pageSize }) : rows;
 }
 
 export async function getPurchaseOrderById(db, id) {

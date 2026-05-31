@@ -5,9 +5,6 @@ import { money, date as fmtDate } from '../lib/format'
 import { getDueUrgency, PO_IN_FLIGHT, SO_IN_FLIGHT } from '../lib/orderStatus'
 import UrgencyBanner from '../components/UrgencyBanner'
 
-const PO_OPEN_STATUSES = ['DRAFT', 'SENT', 'CONFIRMED', 'PARTIALLY_RECEIVED']
-const SO_OPEN_STATUSES = ['DRAFT', 'CONFIRMED', 'PARTIALLY_SHIPPED', 'SHIPPED']
-
 // Dashboard prefers `$0.00` over `—` for blank money so stat cards never look
 // "missing". Coalesce to 0 before formatting.
 const fmtMoney = v => money(v ?? 0)
@@ -35,40 +32,31 @@ export default function Dashboard() {
   async function load() {
     setLoading(true); setError('')
     try {
-      const [items, warehouses, suppliers, customers, pos, sos, stock] = await Promise.all([
-        api.get('/items'),
-        api.get('/warehouses'),
-        api.get('/suppliers'),
-        api.get('/customers'),
-        api.get('/purchase-orders'),
-        api.get('/sales-orders'),
-        api.get('/inventory'),
-      ])
-
-      const openPos = pos.filter(p => PO_OPEN_STATUSES.includes(p.status))
-      const openSos = sos.filter(s => SO_OPEN_STATUSES.includes(s.status))
+      // Single aggregate endpoint — all counts/sums computed server-side, so
+      // we never pull full tables to the renderer. See queries/dashboard.js.
+      const d = await api.get('/dashboard')
 
       setStats({
-        items:      items.length,
-        warehouses: warehouses.length,
-        suppliers:  suppliers.length,
-        customers:  customers.length,
-        openPos:    openPos.length,
-        openSos:    openSos.length,
-        openPoValue: openPos.reduce((sum, p) => sum + Number(p.total_value || 0), 0),
-        openSoValue: openSos.reduce((sum, s) => sum + Number(s.total_value || 0), 0),
-        stockLines:  stock.length,
-        totalUnits:  stock.reduce((sum, row) => sum + Number(row.quantity || 0), 0),
+        items:       d.counts.items,
+        warehouses:  d.counts.warehouses,
+        suppliers:   d.counts.suppliers,
+        customers:   d.counts.customers,
+        openPos:     d.purchaseOrders.open_count,
+        openSos:     d.salesOrders.open_count,
+        openPoValue: d.purchaseOrders.open_value,
+        openSoValue: d.salesOrders.open_value,
+        stockLines:  d.inventory.stock_lines,
+        totalUnits:  d.inventory.total_units,
       })
 
-      setRecentPos(pos.slice(0, 5))
-      setRecentSos(sos.slice(0, 5))
+      setRecentPos(d.recentPos)
+      setRecentSos(d.recentSos)
 
-      // Urgency snapshots for the "Needs attention" panel. We only warn on
-      // in-flight orders — POs already sent to a supplier, SOs already
-      // confirmed to a customer. DRAFTs are deliberately excluded.
-      setUrgentPos(pos.map(p => ({ po: p, ...getDueUrgency(p, PO_IN_FLIGHT) })).filter(u => u.level))
-      setUrgentSos(sos.map(s => ({ so: s, ...getDueUrgency(s, SO_IN_FLIGHT) })).filter(u => u.level))
+      // The server already filtered to in-flight orders within the urgency
+      // window (overdue → due in 3 days). We just label level/days using the
+      // shared client helper so the logic lives in one place.
+      setUrgentPos(d.urgentPos.map(p => ({ po: p, ...getDueUrgency(p, PO_IN_FLIGHT) })).filter(u => u.level))
+      setUrgentSos(d.urgentSos.map(s => ({ so: s, ...getDueUrgency(s, SO_IN_FLIGHT) })).filter(u => u.level))
     } catch (err) {
       setError(err.message)
     } finally {
