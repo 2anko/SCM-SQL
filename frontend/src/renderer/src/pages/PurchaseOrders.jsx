@@ -8,7 +8,7 @@ import { Label } from '../components/ui/label'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '../components/ui/dialog'
-import SummaryPieChart from '../components/SummaryPieChart'
+import SummaryBreakdown from '../components/SummaryBreakdown'
 import PrintableReport from '../components/PrintableReport'
 import { exportPDF, defaultPdfName } from '../api/pdf'
 import { money as fmt, date as fmtDate } from '../lib/format'
@@ -102,7 +102,7 @@ export default function PurchaseOrders() {
       )
     }},
     { header: 'Supplier', accessor: 'supplier' },
-    { header: 'Factory',  render: r => r.factory || '—' },
+    { header: 'Department', render: r => r.factory || '—' },
     { header: 'Status',   render: r => <StatusPill status={r.status} /> },
     { header: 'Lines',    accessor: 'line_count' },
     { header: 'Total',    render: r => fmt(r.total_value) },
@@ -226,6 +226,37 @@ function POFormDialog({ mode, existing, suppliers, items, warehouses, onClose, o
   })
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState('')
+
+  // Warehouses created inline while building this PO (for the "no warehouse
+  // configured yet" case). Merged into the destination dropdowns so they're
+  // immediately selectable. Created for real via POST /warehouses on demand.
+  const [localWarehouses, setLocalWarehouses] = useState([])
+  const allWarehouses = [...warehouses, ...localWarehouses]
+  const [whLineIdx, setWhLineIdx] = useState(null) // which line's "+ new warehouse" panel is open
+  const [whForm, setWhForm]       = useState({ name: '', address: '', country: '' })
+  const [whSaving, setWhSaving]   = useState(false)
+  const [whError, setWhError]     = useState('')
+
+  function openNewWarehouse(idx) {
+    setWhForm({ name: '', address: '', country: '' })
+    setWhError('')
+    setWhLineIdx(idx)
+  }
+  async function createWarehouse() {
+    if (!whForm.name.trim()) { setWhError('Warehouse name is required.'); return }
+    setWhSaving(true); setWhError('')
+    try {
+      const created = await api.post('/warehouses', {
+        name: whForm.name.trim(),
+        ...(whForm.address && { address: whForm.address.trim() }),
+        ...(whForm.country && { country: whForm.country.trim() }),
+      })
+      setLocalWarehouses(prev => [...prev, created])
+      updateLine(whLineIdx, 'destination_warehouse_id', String(created.id))
+      setWhLineIdx(null)
+    } catch (err) { setWhError(err.message) }
+    finally { setWhSaving(false) }
+  }
 
   function f(k) { return e => setForm(p => ({ ...p, [k]: e.target.value })) }
 
@@ -364,7 +395,7 @@ function POFormDialog({ mode, existing, suppliers, items, warehouses, onClose, o
               </select>
             </div>
             <div>
-              <Label>Factory</Label>
+              <Label>Department</Label>
               <select
                 className="mt-1 w-full h-9 rounded-md border border-input bg-transparent px-3 text-sm"
                 value={form.factory_id}
@@ -373,15 +404,15 @@ function POFormDialog({ mode, existing, suppliers, items, warehouses, onClose, o
               >
                 <option value="">{form.supplier_id ? '— None —' : 'Select supplier first'}</option>
                 {factories.map(fac => <option key={fac.id} value={fac.id}>{fac.name}</option>)}
-                {form.supplier_id && <option value="NEW">+ Add new factory…</option>}
+                {form.supplier_id && <option value="NEW">+ Add new department…</option>}
               </select>
             </div>
           </div>
 
           {form.factory_id === 'NEW' && (
             <div className="rounded-md border border-blue-200 bg-blue-50 p-3 space-y-3">
-              <p className="text-xs font-semibold text-blue-700 uppercase tracking-wider">New Factory</p>
-              <div><Label>Factory Name *</Label><Input className="mt-1" value={form.factory_new.name}    onChange={e => updateFactoryNew('name',    e.target.value)} required /></div>
+              <p className="text-xs font-semibold text-blue-700 uppercase tracking-wider">New Department</p>
+              <div><Label>Department *</Label><Input className="mt-1" value={form.factory_new.name} placeholder="e.g. IT - Manager" onChange={e => updateFactoryNew('name', e.target.value)} required /></div>
               <div className="grid grid-cols-2 gap-3">
                 <div><Label>Address</Label><Input className="mt-1" value={form.factory_new.address} onChange={e => updateFactoryNew('address', e.target.value)} /></div>
                 <div><Label>Country</Label><Input className="mt-1" value={form.factory_new.country} onChange={e => updateFactoryNew('country', e.target.value)} /></div>
@@ -479,12 +510,36 @@ function POFormDialog({ mode, existing, suppliers, items, warehouses, onClose, o
                   </div>
                   <div>
                     <Label>Destination</Label>
-                    <select className="mt-1 w-full h-9 rounded-md border border-input bg-transparent px-3 text-sm" value={ln.destination_warehouse_id} onChange={e => updateLine(idx, 'destination_warehouse_id', e.target.value)}>
+                    <select
+                      className="mt-1 w-full h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+                      value={ln.destination_warehouse_id}
+                      onChange={e => {
+                        if (e.target.value === 'NEW') { openNewWarehouse(idx); return }
+                        updateLine(idx, 'destination_warehouse_id', e.target.value)
+                      }}
+                    >
                       <option value="">— None —</option>
-                      {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                      {allWarehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                      <option value="NEW">+ New warehouse…</option>
                     </select>
                   </div>
                 </div>
+
+                {whLineIdx === idx && (
+                  <div className="rounded-md border border-blue-200 bg-blue-50 p-3 space-y-3">
+                    <p className="text-xs font-semibold text-blue-700 uppercase tracking-wider">New Warehouse</p>
+                    <div><Label>Warehouse Name *</Label><Input className="mt-1" value={whForm.name} onChange={e => setWhForm(p => ({ ...p, name: e.target.value }))} /></div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div><Label>Address</Label><Input className="mt-1" value={whForm.address} onChange={e => setWhForm(p => ({ ...p, address: e.target.value }))} /></div>
+                      <div><Label>Country</Label><Input className="mt-1" value={whForm.country} onChange={e => setWhForm(p => ({ ...p, country: e.target.value }))} /></div>
+                    </div>
+                    {whError && <p className="text-sm text-red-600">{whError}</p>}
+                    <div className="flex justify-end gap-2">
+                      <Button type="button" size="sm" variant="ghost" onClick={() => setWhLineIdx(null)} disabled={whSaving}>Cancel</Button>
+                      <Button type="button" size="sm" onClick={createWarehouse} disabled={whSaving}>{whSaving ? 'Creating…' : 'Create & select'}</Button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -548,7 +603,7 @@ function PODetailDialog({ poId, suppliers, items, warehouses, canWrite, onClose,
           <div className="space-y-5">
             <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
               <div><span className="text-gray-500">Supplier: </span>{po.supplier_name}</div>
-              <div><span className="text-gray-500">Factory: </span>{po.factory_name || '—'}</div>
+              <div><span className="text-gray-500">Department: </span>{po.factory_name || '—'}</div>
               <div><span className="text-gray-500">Status: </span><StatusPill status={po.status} /></div>
               <div><span className="text-gray-500">Expected: </span>{fmtDate(po.expected_date)}</div>
               <div><span className="text-gray-500">Created: </span>{fmtDate(po.created_at)}</div>
@@ -869,7 +924,7 @@ function SummaryReportDialog({ suppliers, items, warehouses, canWrite, onChange,
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         {data && (
-          <div className="space-y-6 pt-2">
+          <div className="space-y-6 pt-2 min-w-0">
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-white rounded-lg border border-gray-200 p-4">
                 <p className="text-sm text-gray-500">Purchase Orders (excl. cancelled)</p>
@@ -881,7 +936,14 @@ function SummaryReportDialog({ suppliers, items, warehouses, canWrite, onChange,
               </div>
             </div>
 
-            <SummaryPieChart data={data.by_item} valueKey="total_cost" valueLabel="Cost" />
+            <SummaryBreakdown
+              rows={data.by_item_supplier}
+              valueKey="total_cost"
+              valueLabel="Cost"
+              secondaryIdKey="supplier_id"
+              secondaryLabelKey="supplier"
+              secondaryNoun="Supplier"
+            />
 
             <div>
               <p className="text-sm font-semibold text-gray-700 mb-2">
@@ -923,7 +985,7 @@ function SummaryReportDialog({ suppliers, items, warehouses, canWrite, onChange,
                     <tr>
                       <th className="text-left px-3 py-2">PO #</th>
                       <th className="text-left px-3 py-2">Supplier</th>
-                      <th className="text-left px-3 py-2">Factory</th>
+                      <th className="text-left px-3 py-2">Department</th>
                       <th className="text-left px-3 py-2">Status</th>
                       <th className="text-right px-3 py-2">Lines</th>
                       <th className="text-right px-3 py-2">Total</th>
@@ -992,11 +1054,23 @@ function SummaryReportDialog({ suppliers, items, warehouses, canWrite, onChange,
                 empty: 'No items purchased in this range.',
               },
               {
+                title: `Item breakdown by supplier (${data.by_item_supplier?.length ?? 0})`,
+                columns: [
+                  { header: 'SKU',        accessor: 'sku' },
+                  { header: 'Item',       accessor: 'item' },
+                  { header: 'Supplier',   accessor: 'supplier' },
+                  { header: 'Quantity',   accessor: r => Number(r.total_quantity).toLocaleString(), align: 'right' },
+                  { header: 'Total cost', accessor: r => fmt(r.total_cost), align: 'right' },
+                ],
+                rows: data.by_item_supplier ?? [],
+                empty: 'No supplier breakdown in this range.',
+              },
+              {
                 title: `Purchase orders in range (${data.pos.length})`,
                 columns: [
                   { header: 'PO #',     accessor: r => `#${r.id}` },
                   { header: 'Supplier', accessor: 'supplier' },
-                  { header: 'Factory',  accessor: r => r.factory || '—' },
+                  { header: 'Department', accessor: r => r.factory || '—' },
                   { header: 'Status',   accessor: r => r.status.replace(/_/g, ' ') },
                   { header: 'Lines',    accessor: 'line_count', align: 'right' },
                   { header: 'Total',    accessor: r => fmt(r.total_value), align: 'right' },

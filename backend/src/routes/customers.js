@@ -11,6 +11,7 @@ const createSchema = {
       name:    { type: 'string', minLength: 1 },
       email:   { type: 'string', format: 'email' },
       phone:   { type: 'string' },
+      fax:     { type: 'string' },
       address: { type: 'string' },
     },
   },
@@ -24,6 +25,7 @@ const updateSchema = {
       name:    { type: 'string', minLength: 1 },
       email:   { type: 'string', format: 'email' },
       phone:   { type: 'string' },
+      fax:     { type: 'string' },
       address: { type: 'string' },
     },
   },
@@ -58,17 +60,17 @@ export default async function customerRoutes(app) {
   );
   app.post('/', { preHandler: authorize('create'), schema: createSchema },
     async (req, rep) => {
-      const { name, email, phone, address } = req.body;
+      const { name, email, phone, fax, address } = req.body;
       const { rows } = await req.db.query(
-        'INSERT INTO customers (name, email, phone, address) VALUES ($1,$2,$3,$4) RETURNING *',
-        [name, email, phone, address]
+        'INSERT INTO customers (name, email, phone, fax, address) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+        [name, email, phone, fax, address]
       );
       return rep.code(201).send(rows[0]);
     }
   );
   app.patch('/:id', { preHandler: authorize('write'), schema: updateSchema },
     async (req, rep) => {
-      const allowed = ['name', 'email', 'phone', 'address'];
+      const allowed = ['name', 'email', 'phone', 'fax', 'address'];
       const updates = [];
       const values  = [];
       for (const key of allowed) {

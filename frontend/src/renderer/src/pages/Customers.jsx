@@ -10,7 +10,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '../components/ui/dialog'
 
-const EMPTY = { name: '', email: '', phone: '', address: '' }
+const EMPTY = { name: '', email: '', phone: '', fax: '', address: '' }
 
 export default function Customers() {
   const { user } = useAuth()
@@ -45,7 +45,7 @@ export default function Customers() {
     setForm(EMPTY); setError(''); setDialog({ mode: 'add' })
   }
   function openEdit(r) {
-    setForm({ name: r.name, email: r.email || '', phone: r.phone || '', address: r.address || '' })
+    setForm({ name: r.name, email: r.email || '', phone: r.phone || '', fax: r.fax || '', address: r.address || '' })
     setError(''); setDialog({ mode: 'edit', record: r })
   }
   function openDelete(r) {
@@ -59,6 +59,7 @@ export default function Customers() {
         name: form.name.trim(),
         ...(form.email   && { email:   form.email.trim() }),
         ...(form.phone   && { phone:   form.phone.trim() }),
+        ...(form.fax     && { fax:     form.fax.trim() }),
         ...(form.address && { address: form.address.trim() }),
       }
       if (dialog.mode === 'add') await api.post('/customers', body)
@@ -96,6 +97,7 @@ export default function Customers() {
     { header: 'Name',    accessor: 'name' },
     { header: 'Email',   render: r => r.email   || '—' },
     { header: 'Phone',   render: r => r.phone   || '—' },
+    { header: 'Fax',     render: r => r.fax     || '—' },
     { header: 'Address', render: r => r.address || '—' },
     {
       header: 'Actions',
@@ -138,6 +140,7 @@ export default function Customers() {
             {field('name',    'Name *',   { required: true })}
             {field('email',   'Email',    { type: 'email', placeholder: 'name@example.com' }, 'Must be a valid email (e.g. name@example.com) or left blank.')}
             {field('phone',   'Phone')}
+            {field('fax',     'Fax')}
             {field('address', 'Address')}
             {error && <p className="text-sm text-red-600">{error}</p>}
             <DialogFooter>

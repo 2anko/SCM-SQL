@@ -41,6 +41,27 @@ export async function getSalesOrderSummary(db, { from, to }) {
     ORDER BY so.created_at DESC
   `, [from, to]);
 
+  // Per-item breakdown by customer — how much of each item's revenue/quantity
+  // went to which customer. Powers the summary drill-down (pie/bar).
+  const { rows: byItemCustomer } = await db.query(`
+    SELECT
+      i.id   AS item_id,
+      i.sku,
+      i.name AS item,
+      c.id   AS customer_id,
+      c.name AS customer,
+      SUM(sol.quantity_ordered)                  AS total_quantity,
+      SUM(sol.quantity_ordered * sol.unit_price) AS total_value
+    FROM sales_order_lines sol
+    JOIN items i          ON i.id  = sol.item_id
+    JOIN sales_orders so  ON so.id = sol.so_id
+    JOIN customers c      ON c.id  = so.customer_id
+    WHERE so.created_at::date BETWEEN $1::date AND $2::date
+      AND so.status = 'SHIPPED'
+    GROUP BY i.id, i.sku, i.name, c.id, c.name
+    ORDER BY total_value DESC NULLS LAST
+  `, [from, to]);
+
   const totalValue = byItem.reduce((sum, r) => sum + Number(r.total_value || 0), 0);
   const soCount    = sos.filter(s => s.status === 'SHIPPED').length;
 
@@ -48,6 +69,7 @@ export async function getSalesOrderSummary(db, { from, to }) {
     range:   { from, to },
     totals:  { so_count: soCount, total_value: totalValue },
     by_item: byItem,
+    by_item_customer: byItemCustomer,
     sos,
   };
 }

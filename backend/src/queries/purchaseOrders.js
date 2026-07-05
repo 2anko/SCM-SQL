@@ -317,6 +317,27 @@ export async function getPurchaseOrderSummary(db, { from, to }) {
     ORDER BY po.created_at DESC
   `, [from, to]);
 
+  // Per-item breakdown by supplier — how much of each item's spend/quantity
+  // came from which supplier. Powers the summary drill-down (pie/bar).
+  const { rows: byItemSupplier } = await db.query(`
+    SELECT
+      i.id   AS item_id,
+      i.sku,
+      i.name AS item,
+      s.id   AS supplier_id,
+      s.name AS supplier,
+      SUM(pol.quantity_ordered)                 AS total_quantity,
+      SUM(pol.quantity_ordered * pol.unit_cost) AS total_cost
+    FROM purchase_order_lines pol
+    JOIN items i            ON i.id  = pol.item_id
+    JOIN purchase_orders po ON po.id = pol.po_id
+    JOIN suppliers s        ON s.id  = po.supplier_id
+    WHERE po.created_at::date BETWEEN $1::date AND $2::date
+      AND po.status = 'RECEIVED'
+    GROUP BY i.id, i.sku, i.name, s.id, s.name
+    ORDER BY total_cost DESC NULLS LAST
+  `, [from, to]);
+
   const totalCost = byItem.reduce((sum, r) => sum + Number(r.total_cost || 0), 0);
   const poCount   = pos.filter(p => p.status === 'RECEIVED').length;
 
@@ -324,6 +345,7 @@ export async function getPurchaseOrderSummary(db, { from, to }) {
     range:   { from, to },
     totals:  { po_count: poCount, total_cost: totalCost },
     by_item: byItem,
+    by_item_supplier: byItemSupplier,
     pos,
   };
 }

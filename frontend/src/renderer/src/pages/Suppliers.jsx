@@ -10,9 +10,12 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '../components/ui/dialog'
 
-const EMPTY_SUPPLIER      = { name: '', email: '', phone: '', address: '' }
+const EMPTY_SUPPLIER      = { name: '', email: '', phone: '', fax: '', address: '' }
 const EMPTY_SUPPLIER_FORM = { ...EMPTY_SUPPLIER, factories: [] }
+// A "factory" row is internally still called factory (DB + API unchanged); the
+// UI labels it "Department" and users type e.g. "IT - Manager" into the name.
 const EMPTY_FACTORY       = { name: '', address: '', country: '', rep_name: '', rep_email: '', rep_phone: '' }
+const DEPT_NAME_HINT      = 'e.g. IT - Manager'
 
 // ── Supplier form / delete dialogs ──────────────────────────────────────────
 
@@ -49,24 +52,25 @@ function SupplierDialog({ dialog, form, setForm, saving, error, onSubmit, onClos
             <p className="mt-1 text-xs text-gray-500">Must be a valid email (e.g. name@example.com) or left blank.</p>
           </div>
           <div><Label>Phone</Label> <Input className="mt-1" value={form.phone}   onChange={f('phone')} /></div>
+          <div><Label>Fax</Label>   <Input className="mt-1" value={form.fax}     onChange={f('fax')} /></div>
           <div><Label>Address</Label><Input className="mt-1" value={form.address} onChange={f('address')} /></div>
 
           {isAdd && (
             <div className="space-y-3 pt-2 border-t">
               <div className="flex items-center justify-between pt-2">
-                <p className="text-sm font-semibold text-gray-700">Factories</p>
-                <Button type="button" size="sm" variant="outline" onClick={addFactoryRow}>+ Add Factory</Button>
+                <p className="text-sm font-semibold text-gray-700">Departments</p>
+                <Button type="button" size="sm" variant="outline" onClick={addFactoryRow}>+ Add Department</Button>
               </div>
               {form.factories.length === 0 && (
-                <p className="text-xs text-gray-500">No factories yet. You can add them now or after creation via the Factories button.</p>
+                <p className="text-xs text-gray-500">No departments yet. You can add them now or after creation via the Departments button.</p>
               )}
               {form.factories.map((fac, idx) => (
                 <div key={idx} className="rounded-md border border-gray-200 p-3 space-y-3 bg-gray-50">
                   <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold text-gray-600 uppercase tracking-wider">Factory #{idx + 1}</p>
+                    <p className="text-xs font-semibold text-gray-600 uppercase tracking-wider">Department #{idx + 1}</p>
                     <Button type="button" size="sm" variant="ghost" onClick={() => removeFactoryRow(idx)}>Remove</Button>
                   </div>
-                  <div><Label>Factory Name *</Label><Input className="mt-1" value={fac.name}    onChange={e => updateFactory(idx, 'name', e.target.value)}    required /></div>
+                  <div><Label>Department *</Label><Input className="mt-1" value={fac.name} placeholder={DEPT_NAME_HINT} onChange={e => updateFactory(idx, 'name', e.target.value)} required /></div>
                   <div className="grid grid-cols-2 gap-3">
                     <div><Label>Address</Label><Input className="mt-1" value={fac.address} onChange={e => updateFactory(idx, 'address', e.target.value)} /></div>
                     <div><Label>Country</Label><Input className="mt-1" value={fac.country} onChange={e => updateFactory(idx, 'country', e.target.value)} /></div>
@@ -127,10 +131,10 @@ function FactoryFormDialog({ dialog, form, setForm, saving, error, onSubmit, onC
     <Dialog open={isOpen} onOpenChange={open => !open && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{dialog?.mode === 'add' ? 'Add Factory' : 'Edit Factory'}</DialogTitle>
+          <DialogTitle>{dialog?.mode === 'add' ? 'Add Department' : 'Edit Department'}</DialogTitle>
         </DialogHeader>
         <form onSubmit={onSubmit} className="space-y-4">
-          <div><Label>Factory Name *</Label><Input className="mt-1" value={form.name}    onChange={f('name')}    required /></div>
+          <div><Label>Department *</Label><Input className="mt-1" value={form.name} placeholder={DEPT_NAME_HINT} onChange={f('name')} required /></div>
           <div><Label>Address</Label>        <Input className="mt-1" value={form.address} onChange={f('address')} /></div>
           <div><Label>Country</Label>        <Input className="mt-1" value={form.country} onChange={f('country')} /></div>
 
@@ -164,9 +168,9 @@ function DeleteFactoryDialog({ dialog, saving, error, onConfirm, onClose }) {
   return (
     <Dialog open={dialog?.mode === 'delete'} onOpenChange={open => !open && onClose()}>
       <DialogContent>
-        <DialogHeader><DialogTitle>Delete Factory</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>Delete Department</DialogTitle></DialogHeader>
         <p className="text-sm text-gray-600">
-          Delete factory <strong>{dialog?.record?.name}</strong>? Factories with open purchase orders cannot be deleted.
+          Delete department <strong>{dialog?.record?.name}</strong>? Departments with open purchase orders cannot be deleted.
         </p>
         {error && <p className="text-sm text-red-600">{error}</p>}
         <DialogFooter>
@@ -244,7 +248,7 @@ function FactoriesDialog({ supplier, canCreate, canEdit, canDelete, onClose }) {
   }
 
   const fColumns = [
-    { header: 'Factory',  accessor: 'name' },
+    { header: 'Department', accessor: 'name' },
     { header: 'Address',  render: r => r.address || '—' },
     { header: 'Country',  render: r => r.country || '—' },
     { header: 'Rep',      render: r => r.rep ? `${r.rep.name}${r.rep.phone ? ` · ${r.rep.phone}` : ''}` : '—' },
@@ -264,19 +268,19 @@ function FactoriesDialog({ supplier, canCreate, canEdit, canDelete, onClose }) {
       <Dialog open onOpenChange={open => !open && onClose()}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>Factories — {supplier.name}</DialogTitle>
+            <DialogTitle>Departments — {supplier.name}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             {canCreate && (
               <div className="flex justify-end">
-                <Button size="sm" onClick={openAdd}>Add Factory</Button>
+                <Button size="sm" onClick={openAdd}>Add Department</Button>
               </div>
             )}
             <DataTable
               columns={fColumns}
               data={factories}
               isLoading={loading}
-              emptyMessage="No factories yet"
+              emptyMessage="No departments yet"
             />
           </div>
           <DialogFooter>
@@ -342,7 +346,7 @@ export default function Suppliers() {
     setError(''); setDialog({ mode: 'add' })
   }
   function openEdit(r) {
-    setForm({ name: r.name, email: r.email || '', phone: r.phone || '', address: r.address || '', factories: [] })
+    setForm({ name: r.name, email: r.email || '', phone: r.phone || '', fax: r.fax || '', address: r.address || '', factories: [] })
     setError(''); setDialog({ mode: 'edit', record: r })
   }
   function openDelete(r) {
@@ -356,6 +360,7 @@ export default function Suppliers() {
         name: form.name.trim(),
         ...(form.email   && { email:   form.email.trim() }),
         ...(form.phone   && { phone:   form.phone.trim() }),
+        ...(form.fax     && { fax:     form.fax.trim() }),
         ...(form.address && { address: form.address.trim() }),
       }
 
@@ -384,14 +389,14 @@ export default function Suppliers() {
         try {
           await api.post(`/suppliers/${supplier.id}/factories`, factoryBody)
         } catch (err) {
-          failures.push(`Factory #${idx + 1} (${fac.name || 'unnamed'}): ${err.message}`)
+          failures.push(`Department #${idx + 1} (${fac.name || 'unnamed'}): ${err.message}`)
         }
       }
 
       if (failures.length > 0) {
         setError(
-          `Supplier created, but some factories failed:\n${failures.join('\n')}\n\n` +
-          `Use the Factories button on the row to retry.`
+          `Supplier created, but some departments failed:\n${failures.join('\n')}\n\n` +
+          `Use the Departments button on the row to retry.`
         )
         load()
         return
@@ -412,17 +417,18 @@ export default function Suppliers() {
   }
 
   const columns = [
-    { header: 'Name',      accessor: 'name' },
-    { header: 'Email',     render: r => r.email   || '—' },
-    { header: 'Phone',     render: r => r.phone   || '—' },
-    { header: 'Address',   render: r => r.address || '—' },
-    { header: 'Factories', render: r => r.factories?.length ?? 0 },
+    { header: 'Name',        accessor: 'name' },
+    { header: 'Email',       render: r => r.email   || '—' },
+    { header: 'Phone',       render: r => r.phone   || '—' },
+    { header: 'Fax',         render: r => r.fax     || '—' },
+    { header: 'Address',     render: r => r.address || '—' },
+    { header: 'Departments', render: r => r.factories?.length ?? 0 },
     {
       header: 'Actions',
       render: r => (
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={e => { e.stopPropagation(); setFactoriesFor(r) }}>
-            Factories
+            Departments
           </Button>
           <Button size="sm" variant="outline" onClick={e => { e.stopPropagation(); setItemsFor(r) }}>
             Items
@@ -439,7 +445,7 @@ export default function Suppliers() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Suppliers</h1>
-          <p className="mt-1 text-sm text-gray-500">Manage suppliers and their factories</p>
+          <p className="mt-1 text-sm text-gray-500">Manage suppliers and their departments</p>
         </div>
         {canCreate && <Button onClick={openAdd}>Add Supplier</Button>}
       </div>

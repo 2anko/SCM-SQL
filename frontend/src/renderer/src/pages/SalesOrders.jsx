@@ -8,7 +8,7 @@ import { Label } from '../components/ui/label'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '../components/ui/dialog'
-import SummaryPieChart from '../components/SummaryPieChart'
+import SummaryBreakdown from '../components/SummaryBreakdown'
 import PrintableReport from '../components/PrintableReport'
 import { exportPDF, defaultPdfName } from '../api/pdf'
 import { money as fmt, date as fmtDate } from '../lib/format'
@@ -671,7 +671,7 @@ function SummaryReportDialog({ customers, items, warehouses, canWrite, onChange,
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         {data && (
-          <div className="space-y-6 pt-2">
+          <div className="space-y-6 pt-2 min-w-0">
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-white rounded-lg border border-gray-200 p-4">
                 <p className="text-sm text-gray-500">Sales Orders shipped</p>
@@ -683,7 +683,14 @@ function SummaryReportDialog({ customers, items, warehouses, canWrite, onChange,
               </div>
             </div>
 
-            <SummaryPieChart data={data.by_item} valueKey="total_value" valueLabel="Revenue" />
+            <SummaryBreakdown
+              rows={data.by_item_customer}
+              valueKey="total_value"
+              valueLabel="Revenue"
+              secondaryIdKey="customer_id"
+              secondaryLabelKey="customer"
+              secondaryNoun="Customer"
+            />
 
             <div>
               <p className="text-sm font-semibold text-gray-700 mb-2">
@@ -788,6 +795,18 @@ function SummaryReportDialog({ customers, items, warehouses, canWrite, onChange,
                 ],
                 rows: data.by_item,
                 empty: 'No items sold in this range.',
+              },
+              {
+                title: `Item breakdown by customer (${data.by_item_customer?.length ?? 0})`,
+                columns: [
+                  { header: 'SKU',           accessor: 'sku' },
+                  { header: 'Item',          accessor: 'item' },
+                  { header: 'Customer',      accessor: 'customer' },
+                  { header: 'Quantity',      accessor: r => Number(r.total_quantity).toLocaleString(), align: 'right' },
+                  { header: 'Total revenue', accessor: r => fmt(r.total_value), align: 'right' },
+                ],
+                rows: data.by_item_customer ?? [],
+                empty: 'No customer breakdown in this range.',
               },
               {
                 title: `Sales orders in range (${data.sos.length})`,
